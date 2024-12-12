@@ -12,8 +12,6 @@ import uuid
 import time
 from datetime import datetime
 
-# 1896820725 天津股侠 2024-12-09T16:47:04
-
 DATABASE_PATH = './weibo/weibodata.db'
 print(DATABASE_PATH)
 
@@ -190,8 +188,6 @@ def get_weibos():
             weibo = dict(zip(columns, row))
             weibos.append(weibo)
         conn.close()
-        res1 = json.dumps(weibos, ensure_ascii=False)
-        print(res1)
         res = jsonify(weibos)
         print(res)
         return res, 200
