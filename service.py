@@ -25,10 +25,11 @@ logger = logging.getLogger("api")
 config = {
     "user_id_list": [
         "6067225218", 
-        "1445403190"
+        "1445403190",
+        # "2431967372"
         ],
     "only_crawl_original": 1,
-    "since_date": 1,
+    "since_date": 2,
     "start_page": 1,
     "write_mode": [
         "csv",

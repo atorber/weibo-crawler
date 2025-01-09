@@ -1,18 +1,20 @@
 {
     "user_id_list": "user_id_list.txt",
-    "only_crawl_original": 0,
-    "since_date": 1,
+    "only_crawl_original": 1,
+    "since_date": "2024-12-07",
     "start_page": 1,
     "write_mode": [
-        "csv"
+        "csv",
+        "json",
+        "sqlite"
     ],
-    "original_pic_download": 1,
+    "original_pic_download": 0,
     "retweet_pic_download": 0,
-    "original_video_download": 1,
+    "original_video_download": 0,
     "retweet_video_download": 0,
-    "download_comment": 1,
+    "download_comment": 0,
     "comment_max_download_count": 100,
-    "download_repost": 1,
+    "download_repost": 0,
     "repost_max_download_count": 100,
     "user_id_as_folder_name": 0,
     "remove_html_tag": 1,
