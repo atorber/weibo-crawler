@@ -120,7 +120,7 @@ class LarkAPI:
                     lark.logger.error(
                         f"client.request failed, code: {response_next.code}, msg: {response_next.msg}, log_id: {response_next.get_log_id()}")
                 has_more = json.loads(response_next.raw.content)['data']['has_more']
-                time.sleep(0.2)
+                time.sleep(0.5)
                 if has_more:
                     page_token = json.loads(response_next.raw.content)['data']['page_token']
                 
