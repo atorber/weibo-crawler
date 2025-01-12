@@ -109,7 +109,8 @@ class LarkAPI:
         response_all.append(json.loads(response.raw.content)['data']['items'])
 
         has_more = json.loads(response.raw.content)['data']['has_more']
-
+        time.sleep(0.5)
+        
         if has_more:
             page_token = json.loads(response.raw.content)['data']['page_token']
 

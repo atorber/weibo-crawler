@@ -44,8 +44,8 @@
     ],
     "compounds": [
         {
-            "name": "同时启动weibo.py和 Node.js",
-            "configurations": ["启动weibo.py", "FUTU API"]
+            "name": "同时启动API服务和APP",
+            "configurations": ["启动API服务", "启动APP"]
         }
     ]
 }
