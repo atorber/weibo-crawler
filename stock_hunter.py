@@ -30,21 +30,26 @@ table_id_weibo = api.get_table_id("微博")
 DATABASE_PATH = './weibo/weibodata.db'
 logging.info(DATABASE_PATH)
 
+
 def call_openai_api(text, system_prompt=None):
     """调用OpenAI API生成文本"""
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=os.getenv("OPENAI_API_URL"))
+    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENAI_API_URL")
+    model =os.getenv("OPENAI_MODEL")
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
     try:
         if system_prompt:
-            completion = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": text}])
+            completion = client.chat.completions.create(model=model, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": text}])
         else:
-            completion = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": text}])
+            completion = client.chat.completions.create(model=model, messages=[{"role": "user", "content": text}])
         logging.info(completion)
         return completion.choices[0].message.content
     except Exception as e:
-        logging.exception("OpenAI API调用失败")
+        logging.exception("OpenAI API调用失败", e)
         return "生成文本时出错。"
-    
+
+  
 def get_stock_data(text):
     """使用gpt从文本中找出股票名称"""
     system_prompt = '''
