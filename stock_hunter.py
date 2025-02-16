@@ -201,6 +201,7 @@ def find_stock(weibo, retry_count=0):
             logging.info('保存结果 %s', res)
         else:
             try:
+                res = res.replace('```json', '').replace('```', '')
                 res_json = json.loads(res)
                 logging.info("解析成功 %s", res_json)
 
