@@ -231,7 +231,7 @@ def find_stock(weibo, retry_count=0):
 
             except Exception as e:
                 logging.error("解析失败, 重新解析 %s", e)
-                time.sleep(1)
+                time.sleep(3)
                 find_stock(weibo, retry_count + 1)
 
 # 统计stock表中的数据
@@ -321,7 +321,7 @@ def update_stock(table_name_stock, weibo_user=None):
             logging.info('微博未被解析：%s', id)
             find_stock(weibo)
 
-            time.sleep(1)
+            time.sleep(3)
         else:
             logging.info('该微博已解析：%s', id)
             #尝试json.loads(stock_old['text'])，如果text不是json格式，则更新text为{}
