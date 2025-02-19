@@ -20,15 +20,18 @@ logging.basicConfig(
     ]
 )
 
+# 延时
 app_id = os.getenv("app_id")
 app_secret = os.getenv("app_secret")
 app_token = os.getenv("app_token")
 api = LarkAPI(app_id, app_secret, app_token)
 table_id_blacklist = api.get_table_id("黑名单")
+time.sleep(1)
 table_id_weibo = api.get_table_id("微博")
-
+time.sleep(1)
 DATABASE_PATH = './weibo/weibodata.db'
-logging.info(DATABASE_PATH)
+# 打印数据库文件路径,用于调试和确认数据库位置
+logging.info("数据库文件路径: %s", DATABASE_PATH)
 
 
 def call_openai_api(text, system_prompt=None):
