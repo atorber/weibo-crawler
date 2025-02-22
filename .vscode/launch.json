@@ -32,14 +32,6 @@
             "program": "${workspaceFolder}\\weibo.py",
             "console": "integratedTerminal",
             "justMyCode": true
-        },
-        {
-            "name": "FUTU API",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}\\futu.py",
-            "console": "integratedTerminal",
-            "justMyCode": true
         }
     ],
     "compounds": [
