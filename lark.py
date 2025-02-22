@@ -109,19 +109,19 @@ class LarkAPI:
         response_all.append(json.loads(response.raw.content)['data']['items'])
 
         has_more = json.loads(response.raw.content)['data']['has_more']
-        time.sleep(0.5)
+        time.sleep(1)
         
         if has_more:
             page_token = json.loads(response.raw.content)['data']['page_token']
-
             while has_more and page_token not in page_token_all:
                 response_next = self.get_records(table_id, page_token)
+                time.sleep(1)
                 page_token_all.append(page_token)
                 if not response_next.success():
                     lark.logger.error(
                         f"client.request failed, code: {response_next.code}, msg: {response_next.msg}, log_id: {response_next.get_log_id()}")
                 has_more = json.loads(response_next.raw.content)['data']['has_more']
-                time.sleep(0.5)
+                time.sleep(1)
                 if has_more:
                     page_token = json.loads(response_next.raw.content)['data']['page_token']
                 
