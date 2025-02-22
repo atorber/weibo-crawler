@@ -381,3 +381,4 @@ js.json
 user_id_list.txt
 weibo/weibodata.db
 weibo/*/**/*.csv
+weibo/*/*.csv

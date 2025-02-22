@@ -9,14 +9,18 @@ load_dotenv()
 
 
 class LarkAPI:
+
+    tables = []
+
     def __init__(self, app_id, app_secret, app_token):
         self.client = lark.Client.builder().app_id(app_id)\
             .app_secret(app_secret)\
             .log_level(lark.LogLevel.INFO).build()
         self.app_token = app_token
+        self.tables = self.get_tables() 
         # self.table_id = self.get_table_id()
 
-    def get_table_id(self, name):
+    def get_tables(self):
         request = lark.BaseRequest.builder() \
             .http_method(lark.HttpMethod.GET) \
             .uri(f"/open-apis/bitable/v1/apps/{self.app_token}/tables") \
@@ -26,8 +30,11 @@ class LarkAPI:
         if not response.success():
             lark.logger.error(
                 f"client.request failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}")
-            return ''
-        tables = json.loads(response.raw.content)['data']['items']
+        self.tables = json.loads(response.raw.content)['data']['items']
+        return self.tables
+
+    def get_table_id(self, name):
+        tables = self.tables
         for table in tables:
             if table['name'] == name:
                 return table['table_id']

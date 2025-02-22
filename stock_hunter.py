@@ -28,9 +28,9 @@ app_secret = os.getenv("app_secret")
 app_token = os.getenv("app_token")
 api = LarkAPI(app_id, app_secret, app_token)
 table_id_blacklist = api.get_table_id("黑名单")
-time.sleep(2)
+time.sleep(3)
 table_id_weibo = api.get_table_id("微博")
-time.sleep(2)
+time.sleep(3)
 DATABASE_PATH = "./weibo/weibodata.db"
 # 打印数据库文件路径,用于调试和确认数据库位置
 logging.info("数据库文件路径: %s", DATABASE_PATH)
@@ -178,7 +178,7 @@ def get_stock(id):
         conn.close()
         return stock
     except Exception as e:
-        logging.exception(e)
+        logging.exception('get_stock error: %s', e)
         return {"error": "Stock not found"}
 
 
@@ -253,6 +253,8 @@ def find_stock(weibo, retry_count=0):
                 for stock in res_json.keys():
                     item = res_json[stock]
                     item.append(weibo["screen_name"])
+                    # 增加日期标签
+                    item.append(time.strftime("%Y-%m-%d", time.localtime()))
                     res_json[stock] = item
                 weibo["text"] = json.dumps(res_json, ensure_ascii=False)
                 weibo["attitudes_count"] = len(res_json.keys())
@@ -366,6 +368,7 @@ def update_stock_to_cloud(table_name_stock, weibo_user=None):
             time.sleep(1)
         else:
             logging.info("数据库中存在记录，微博已解析：%s", id)
+            logging.info("微博发布时间：%s", stock_old["created_at"])
             # 尝试json.loads(stock_old['text'])，如果text不是json格式，则更新text为{}
             try:
                 res = json.loads(stock_old["text"])
@@ -414,11 +417,16 @@ def update_stock_to_cloud(table_name_stock, weibo_user=None):
     new_records_code = []
     stock = {}
     new_stocks = []
+    blacklist_in_cloud = []
+    has_in_cloud_list = []
+    has_not_in_cloud_list = []
+
     for key in table3.keys():
         tag = table3[key]
         name = key
         if key in blacklist:
-            logging.info("黑名单：%s", key)
+            # logging.info("黑名单：%s", key)
+            blacklist_in_cloud.append(key)
             new_name = blacklist_map[key] if key in blacklist_map.keys() else None  # noqa: E501
             if new_name is not None:
                 name = new_name
@@ -426,7 +434,8 @@ def update_stock_to_cloud(table_name_stock, weibo_user=None):
                 continue
 
         if name not in all_names:
-            logging.info("云端不存在股票：%s", name)
+            # logging.info("云端不存在股票：%s", name)
+            has_not_in_cloud_list.append(name)
             stock = {"名称": name, "标签": tag, "热度": table1[key]}
             logging.info("向云端添加记录名称：%s", name)
             logging.info("向云端添加记录：%s", stock)
@@ -436,25 +445,36 @@ def update_stock_to_cloud(table_name_stock, weibo_user=None):
                 stock['最后提及时间'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # noqa: E501
                 new_stocks.append(stock)
         else:
-            logging.info("stock在云端已存在：%s", name)
+            # logging.info("股票在云端已存在：%s", name)
+            has_in_cloud_list.append(name)
             record = all_records_raw[name]
             # 合并标签
             old_tag = (
                 record["fields"]["标签"] if "标签" in record["fields"].keys() else []  # noqa: E501
             )
-            tag = old_tag + tag
-            # 移除screen_name标签
-            tag = [x for x in tag if x != "screen_name"]
-            # 去重
-            tag = list(set(tag))
+            new_tag = old_tag
 
-            fields = {"名称": name, "标签": tag, "热度": table1[key]}
-            fields['最后提及时间'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # noqa: E501
-            logging.info("更新云端股票记录：%s", fields)
-            new_record = {"record_id": record["record_id"], "fields": fields}
-            new_records.append(new_record)
+            has_new_tag = False
+            for t in tag:
+                # 如果t不存在于old_tag中，则添加到new_tag中
+                if t not in old_tag:
+                    logging.info("%s 新标签：%s", name, t)
+                    has_new_tag = True
+                    new_tag.append(t)
+
+            if has_new_tag:
+                fields = {"名称": name, "标签": new_tag, "热度": table1[key]}
+                fields['最后提及时间'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # noqa: E501
+                logging.info("更新云端股票记录：%s", fields)
+                new_record = {"record_id": record["record_id"], "fields": fields}  # noqa: E501
+                new_records.append(new_record)
+
+    logging.info("已在云端股票：%d", len(has_in_cloud_list))
+    logging.info("在云端黑名单：%d", len(blacklist_in_cloud))
+    logging.info("云端不存在股票：%d", len(has_not_in_cloud_list))
 
     if len(new_stocks) > 0:
+        logging.info("向云端添加记录：%d", json.dumps(new_stocks, ensure_ascii=False))
         # new_holdings分片添加，每次500条
         for i in range(0, len(new_stocks), 500):
             api.batch_add_records(table_id_stock, new_stocks[i: i + 500])
