@@ -94,12 +94,15 @@ def get_stock_data(text):
 
 
 # 获取微博
-def get_weibos():
+def get_weibos(created_at=None):
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         # 按created_at倒序查询所有微博
-        cursor.execute("SELECT * FROM weibo ORDER BY created_at DESC")
+        if created_at is not None:
+            cursor.execute("SELECT * FROM weibo WHERE created_at >= ? ORDER BY created_at DESC", (created_at,))  # noqa: E501
+        else:
+            cursor.execute("SELECT * FROM weibo ORDER BY created_at DESC")
         columns = [column[0] for column in cursor.description]
         weibos = []
         for row in cursor.fetchall():
@@ -178,7 +181,7 @@ def get_stock(id):
         conn.close()
         return stock
     except Exception as e:
-        logging.exception('get_stock error: %s', e)
+        logging.exception('数据记录不存在: %s', e)
         return {"error": "Stock not found"}
 
 
@@ -237,6 +240,7 @@ def find_stock(weibo, retry_count=0):
         res = add_stocks(weibo)
         logging.info("标记结果成功 %s", res)
     else:
+        logging.info("解析结果不为空：%s", res)
         try:
             res = res.replace("```json", "").replace("```", "")
             res_json = json.loads(res)
