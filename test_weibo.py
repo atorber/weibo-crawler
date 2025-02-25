@@ -49,7 +49,7 @@ def main():
     # 当前日期的前一天
     today = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     # today = '2025-02-23'
-    created_at = today + ' 15:00:00'
+    created_at = today + ' 9:00:00'
     print('当前日期为%s' % today)
     print('当前时间为%s' % created_at)
     weibos = get_weibos(created_at=created_at)
@@ -67,7 +67,7 @@ def main():
     # 调用openai api
     system_prompt = '''
 你是一个资深股票投资基金经理，擅长通过研报信息挖掘暴涨牛股，你能够从研报信息中整理出基础股票池、精选股票池和交易股票池。
-你的投资理念是“选赛道、精选股、做减法”，即选准赛道在看好的方向选择优质股票再结合市场表现进一步缩减最终选出交易的股票
+你的投资理念是"选赛道、精选股、做减法"，即选准赛道在看好的方向选择优质股票再结合市场表现进一步缩减最终选出交易的股票
 
 - 股票池定义：
 1. 基础股票池：主要用户观察行情、板块趋势,初选股票,纳入研报中提及的所有股票
@@ -100,4 +100,19 @@ def main():
     logging.info("保存微博到云端成功")
 
 if __name__ == "__main__":
-    main()
+    # 每天上午9:00周期执行一次
+    last_run_date = None
+    while True:
+        now = datetime.now()
+        current_date = now.date()
+        
+        # 检查是否是上午9点且今天还没有运行过
+        if now.hour == 9 and current_date != last_run_date:
+            logger.info(f"开始执行每日任务，当前时间: {now}")
+            main()
+            last_run_date = current_date
+            logger.info(f"任务执行完成，下次执行时间: {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')} 09:00:00")
+        else:
+            logger.info(f"当前时间: {now}, 不在执行时间范围内") 
+        # 每分钟检查一次
+        time.sleep(60)
