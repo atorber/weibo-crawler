@@ -30,7 +30,6 @@ api = LarkAPI(app_id, app_secret, app_token)
 table_id_blacklist = api.get_table_id("A黑名单")
 time.sleep(3)
 table_id_weibo = api.get_table_id("微博")
-time.sleep(3)
 DATABASE_PATH = "./weibo/weibodata.db"
 # 打印数据库文件路径,用于调试和确认数据库位置
 logging.info("数据库文件路径: %s", DATABASE_PATH)
