@@ -49,7 +49,7 @@ def main():
     # 当前日期的前一天
     today = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     # today = '2025-02-23'
-    created_at = today + ' 9:00:00'
+    created_at = today + ' 09:00:00'
     print('当前日期为%s' % today)
     print('当前时间为%s' % created_at)
     weibos = get_weibos(created_at=created_at)
@@ -67,7 +67,7 @@ def main():
     # 调用openai api
     system_prompt = '''
 你是一个资深股票投资基金经理，擅长通过研报信息挖掘暴涨牛股，你能够从研报信息中整理出基础股票池、精选股票池和交易股票池。
-你的投资理念是"选赛道、精选股、做减法"，即选准赛道在看好的方向选择优质股票再结合市场表现进一步缩减最终选出交易的股票
+你的投资理念是“选赛道、精选股、做减法”，即选准赛道在看好的方向选择优质股票再结合市场表现进一步缩减最终选出交易的股票
 
 - 股票池定义：
 1. 基础股票池：主要用户观察行情、板块趋势,初选股票,纳入研报中提及的所有股票
@@ -75,13 +75,33 @@ def main():
 3. 交易股票池：从精选股票池中选择最优可能上涨的股票进行交易
 
 - 要求：
-1. 基础股票池中的股票需要覆盖研报中提及的全部A股股票，按主题和板块分类
+1. 基础股票池中的股票需要覆盖研报中提及的全部A股股票，按主题和板块分类，主题进包括AI算力、AI+、机器人、AI眼镜等相关主题，其他主题的股票不纳入股票池
 2. 精选股票池、交易股票池股票需要标注纳入股票池的原因和逻辑
 4. 精选股票池从基础股票池中选取不超过30只，交易股票池从精选股票池中选取不超过10只
 
 - 限制
 1. 输出是不使用表格、不使用markdown格式，输出内容为纯文本，可以直接被作为新浪微博文本发布
-2. 不能编造研报原文中没有提及的股票'''
+2. 不能编造研报原文中没有提及的股票
+3. 不能遗漏研报中提及的任何一只股票
+
+- 输出格式
+
+💹 交易股票池
+
+<股票1>：<主题>，<原因和逻辑>
+
+✨ 精选股票池
+
+<股票1>：<主题>，<原因和逻辑>
+
+📦 基础股票池
+
+【主题名称1>】：<股票1>、<股票2>
+
+【主题名称2】：<股票3>、<股票4>
+
+策略说明：<策略的说明>
+风险提示：<风险提示>'''
 
     full_prompt = system_prompt + '\n' + all_weibos
 
@@ -100,19 +120,22 @@ def main():
     logging.info("保存微博到云端成功")
 
 if __name__ == "__main__":
-    # 每天上午9:00周期执行一次
-    last_run_date = None
-    while True:
-        now = datetime.now()
-        current_date = now.date()
+
+    main()
+
+    # # 每天上午9:00周期执行一次
+    # last_run_date = None
+    # while True:
+    #     now = datetime.now()
+    #     current_date = now.date()
         
-        # 检查是否是上午9点且今天还没有运行过
-        if now.hour == 9 and current_date != last_run_date:
-            logger.info(f"开始执行每日任务，当前时间: {now}")
-            main()
-            last_run_date = current_date
-            logger.info(f"任务执行完成，下次执行时间: {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')} 09:00:00")
-        else:
-            logger.info(f"当前时间: {now}, 不在执行时间范围内") 
-        # 每分钟检查一次
-        time.sleep(60)
+    #     # 检查是否是上午9点且今天还没有运行过
+    #     if now.hour == 9 and current_date != last_run_date:
+    #         logger.info(f"开始执行每日任务，当前时间: {now}")
+    #         main()
+    #         last_run_date = current_date
+    #         logger.info(f"任务执行完成，下次执行时间: {(current_date + timedelta(days=1)).strftime('%Y-%m-%d')} 09:00:00")
+    #     else:
+    #         logger.info(f"当前时间: {now}, 不在执行时间范围内") 
+    #     # 每分钟检查一次
+    #     time.sleep(60)
