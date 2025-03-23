@@ -2,6 +2,7 @@ from weibo import Weibo, handle_config_renaming
 import logging
 import logging.config
 import os
+import sys
 from flask import Flask, jsonify, request
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -9,14 +10,21 @@ import threading
 import uuid
 import time
 from datetime import datetime
+# 引入环境变量
+from dotenv import load_dotenv
 
-DATABASE_PATH = "./weibo/weibodata.db"
+load_dotenv()
+
+ROOT_PATH = os.getenv("ROOT_PATH")
+sys.path.append(ROOT_PATH)
+
+DATABASE_PATH = os.path.join(ROOT_PATH, "weibo/weibodata.db")
 print(DATABASE_PATH)
 
 # 如果日志文件夹不存在，则创建
 if not os.path.isdir("log/"):
     os.makedirs("log/")
-logging_path = os.path.split(os.path.realpath(__file__))[0] + os.sep + "logging.conf"  # noqa:501
+logging_path = os.path.join(ROOT_PATH, "logging.conf")
 logging.config.fileConfig(logging_path)
 logger = logging.getLogger("api")
 
@@ -27,7 +35,7 @@ config = {
         # "2431967372"
     ],
     "only_crawl_original": 1,
-    "since_date": 2,
+    "since_date": 3,
     "start_page": 1,
     "write_mode": ["csv", "json", "sqlite"],
     "original_pic_download": 0,
@@ -40,7 +48,7 @@ config = {
     "repost_max_download_count": 100,
     "user_id_as_folder_name": 0,
     "remove_html_tag": 1,
-    "cookie": "your weibo cookie",
+    "cookie": "XSRF-TOKEN=Fy_ex7sKFSLXJ5GWRg6f_GyC; SCF=AhJXMtQfdkJ0PY2Bzp6aVLArCQz8qDVh5TrkAOUztAI-j9TxL__CF7AnYE8G6S774PpKxWIVRH8ADsUcbrYTG3s.; SUB=_2A25KzVTpDeRhGeFH41EU9SfIwzSIHXVpo-ghrDV8PUNbmtANLVf9kW9NelC8JEWZrjo2T-X7aruCMs1PBpF5L3BA; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9WhoZ7eAlUHUl5ccZmbpBSqN5JpX5KzhUgL.FoM41hefSK.X1hn2dJLoIEBLxKMLBK5L1KBLxKqL122LBK-LxKML12eL12-LxKqL1h.L12zt; ALF=02_1743827385; WBPSESS=kwbxuYpWJCWONCtGK4ToQPx-u-YAZcXHRWgnNI5ol4kSMNTLoyTwbyCTA9EO5XTMNVeNdHgo8dCLQWqZsX41r-NFKFJbIGT_7Q-SnVZKt__oahz0-zjGk4s4K-Y6sKqPFVsVj9p29VxhR-WnHVCtbQ==",
     "mysql_config": {
         "host": "localhost",
         "port": 3306,
@@ -102,6 +110,8 @@ def run_refresh_task(task_id, user_id_list=None):
         tasks[task_id]["progress"] = 100
         tasks[task_id]["state"] = "SUCCESS"
         tasks[task_id]["result"] = {"message": "微博列表已刷新"}
+        logger.info(tasks)
+        logger.info(f"任务 {task_id} 已完成")
 
     except Exception as e:
         tasks[task_id]["state"] = "FAILED"

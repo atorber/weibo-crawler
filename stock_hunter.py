@@ -2,6 +2,7 @@
 import logging
 import logging.config
 import os
+import sys
 import sqlite3
 import json
 from openai import OpenAI
@@ -12,6 +13,9 @@ from lark import LarkAPI
 from dotenv import load_dotenv
 
 load_dotenv()
+
+ROOT_PATH = os.getenv("ROOT_PATH")
+sys.path.append(ROOT_PATH)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,10 +34,9 @@ api = LarkAPI(app_id, app_secret, app_token)
 table_id_blacklist = api.get_table_id("A黑名单")
 time.sleep(3)
 table_id_weibo = api.get_table_id("微博")
-DATABASE_PATH = "./weibo/weibodata.db"
+DATABASE_PATH = os.path.join(ROOT_PATH, "weibo/weibodata.db")
 # 打印数据库文件路径,用于调试和确认数据库位置
 logging.info("数据库文件路径: %s", DATABASE_PATH)
-
 
 # 调用OpenAI API生成文本
 def call_openai_api(text, system_prompt=None):
@@ -217,14 +220,14 @@ def del_stock(id):
 # 微博文本中查找股票
 def find_stock(weibo, retry_count=0):
     logging.info("开始查找股票，第%d次", retry_count)
-    if retry_count >= 5:
-        logging.error("重试次数超过5次，放弃处理")
-        weibo["text"] = "{}"
-        weibo["attitudes_count"] = 0
-        # 将微博解析结果标记到数据库
-        res = add_stocks(weibo)
-        logging.info("标记结果 %s", res)
-        return
+    # if retry_count >= 5:
+    #     logging.error("重试次数超过5次，放弃处理")
+    #     weibo["text"] = "{}"
+    #     weibo["attitudes_count"] = 0
+    #     # 将微博解析结果标记到数据库
+    #     res = add_stocks(weibo)
+    #     logging.info("标记结果 %s", res)
+    #     return
 
     text = weibo["text"]
     res = get_stock_data(text)
@@ -284,7 +287,7 @@ def count_stock(weibo_user):
     table = {}
     for stock in stocks:
         text = stock["text"]
-        logging.info("解析结果：%s", text)
+        logging.info("解析结果 %s：%s", stock["created_at"], text)
         res = json.loads(text)
         for key in res.keys():
             if key in table.keys():
@@ -384,13 +387,13 @@ def update_stock_to_cloud(table_name_stock, weibo_user=None):
                 logging.info("更新数据库微博解析记录成功")
 
     table1 = count_stock(weibo_user)
-    logging.info("统计结果：%s", json.dumps(table1, ensure_ascii=False))
+    # logging.info("统计结果：%s", json.dumps(table1, ensure_ascii=False))
 
     table2 = tag_stock(weibo_user)
-    logging.info("标签结果：%s", json.dumps(table2, ensure_ascii=False))
+    # logging.info("标签结果：%s", json.dumps(table2, ensure_ascii=False))
 
     table3 = stock_tag(weibo_user)
-    logging.info("股票标签：%s", json.dumps(table3, ensure_ascii=False))
+    # logging.info("股票标签：%s", json.dumps(table3, ensure_ascii=False))
 
     # 获取黑名单
     logging.info("从云端获取黑名单")

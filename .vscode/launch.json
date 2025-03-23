@@ -10,14 +10,6 @@
             "justMyCode": true
         },
         {
-            "name": "启动APP_PRO",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}\\app_pro.py",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
             "name": "启动API服务",
             "type": "debugpy",
             "request": "launch",
