@@ -49,7 +49,7 @@ def main():
     # 当前日期的前一天
     today = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     # today = '2025-02-23'
-    created_at = today + ' 09:00:00'
+    created_at = today + ' 00:00:00'
     print('当前日期为%s' % today)
     print('当前时间为%s' % created_at)
     weibos = get_weibos(created_at=created_at)
