@@ -1,16 +1,35 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
-            "type": "python",
+            "name": "启动APP",
+            "type": "debugpy",
             "request": "launch",
-            "program": "weibo.py",
+            "program": "${workspaceFolder}\\app.py",
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "启动API服务",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\service.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "启动weibo.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\weibo.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ],
+    "compounds": [
+        {
+            "name": "同时启动API服务和APP",
+            "configurations": ["启动API服务", "启动APP"]
         }
     ]
 }
