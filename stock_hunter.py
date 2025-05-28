@@ -30,6 +30,7 @@ logging.basicConfig(
 app_id = os.getenv("app_id")
 app_secret = os.getenv("app_secret")
 app_token = os.getenv("app_token")
+
 api = LarkAPI(app_id, app_secret, app_token)
 table_id_blacklist = api.get_table_id("A黑名单")
 time.sleep(3)
@@ -500,8 +501,8 @@ if __name__ == "__main__":
 
     table_name_stock = "精选跟踪"
     weibo_user = [
-        # '财富秘钥',
-        # '专业证券分析',
-        "倩男游神"
+        '财富秘钥',
+        '专业证券分析',
+        # "倩男游神"
     ]
     update_stock_to_cloud(table_name_stock, weibo_user)

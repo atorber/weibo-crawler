@@ -1,3 +1,7 @@
+'''
+解析微博，获取指数样本，并更新到云文档
+'''
+
 from stock_hunter import update_stock_to_cloud
 import time
 
