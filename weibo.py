@@ -30,6 +30,7 @@ import const
 from util import csvutil
 from util.dateutil import convert_to_days_ago
 from util.notify import push_deer
+from util.llm_analyzer import LLMAnalyzer  # 导入 LLM 分析器
 
 warnings.filterwarnings("ignore")
 
@@ -103,17 +104,42 @@ class Weibo(object):
         self.user_id_as_folder_name = config.get(
             "user_id_as_folder_name", 0
         )  # 结果目录名，取值为0或1，决定结果文件存储在用户昵称文件夹里还是用户id文件夹里
-        cookie = config.get("cookie")  # 微博cookie，可填可不填
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.111 Safari/537.36"
-        self.headers = {"User_Agent": user_agent, "Cookie": cookie}
+        cookie_string = config.get("cookie")  # 微博cookie，可填可不填
+        cookies = {}
+        for pair in cookie_string.split(';'):
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                cookies[key.strip()] = value.strip()
+        self.headers = {
+            'Referer': 'https://weibo.com/',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+            'cache-control': 'max-age=0',
+            'priority': 'u=0, i',
+            'sec-ch-ua': '"Chromium";v="136", "Microsoft Edge";v="136", "Not.A/Brand";v="99"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'same-origin',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+        }
         self.mysql_config = config.get("mysql_config")  # MySQL数据库连接配置，可以不填
         self.mongodb_URI = config.get(
             "mongodb_URI"
         )  # MongoDB数据库连接字符串，可以不填
         self.post_config = config.get("post_config")  # post_config，可以不填
         self.page_weibo_count = config.get("page_weibo_count")  # page_weibo_count，爬取一页的微博数，默认10页
+        
+        # 初始化 LLM 分析器
+        self.llm_analyzer = LLMAnalyzer(config) if config.get("llm_config") else None
+        
         user_id_list = config["user_id_list"]
-        self.session = requests.Session()
+        requests_session = requests.Session()
+        requests_session.cookies.update(cookies)
+
+        self.session = requests_session
         adapter = HTTPAdapter(max_retries=5)
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
@@ -1035,6 +1061,11 @@ class Weibo(object):
         weibo["reposts_count"] = self.string_to_int(weibo_info.get("reposts_count", 0))
         weibo["topics"] = self.get_topics(selector)
         weibo["at_users"] = self.get_at_users(selector)
+        
+        # 使用 LLM 分析微博内容
+        if self.llm_analyzer:
+            weibo = self.llm_analyzer.analyze_weibo(weibo)
+            logger.info("完整分析结果：\n%s", json.dumps(weibo, ensure_ascii=False, indent=2))
         return self.standardize_info(weibo)
 
     def print_user_info(self):
@@ -1334,12 +1365,11 @@ class Weibo(object):
 
     def is_pinned_weibo(self, info):
         """判断微博是否为置顶微博"""
-        weibo_info = info["mblog"]
-        isTop = weibo_info.get("isTop")
-        if isTop:
-            return True
-        else:
-            return False
+        isTop=False
+        # Only works for sim chinese
+        if "mblog" in info and "title" in info["mblog"] and "text" in info["mblog"]["title"] and info["mblog"]["title"]["text"]=="置顶":
+        	isTop=True
+        return isTop
 
     def get_one_page(self, page):
         """获取一页的全部微博"""
@@ -1387,8 +1417,8 @@ class Weibo(object):
                                 # append模式下不会对置顶微博做任何处理
 
                                 # 由于微博本身的调整，下面判断是否为置顶的代码已失效，默认所有用户第一条均为置顶
-                                # if self.is_pinned_weibo(w):
-                                #     continue
+                                if self.is_pinned_weibo(w):
+                                    continue
                                 if const.CHECK_COOKIE["GUESS_PIN"]:
                                     const.CHECK_COOKIE["GUESS_PIN"] = False
                                     continue
@@ -1842,6 +1872,7 @@ class Weibo(object):
                 at_users varchar(1000),
                 pics varchar(3000),
                 video_url varchar(1000),
+                live_photo_url varchar(1000),
                 location varchar(100),
                 created_at DATETIME,
                 source varchar(30),
@@ -2023,6 +2054,7 @@ class Weibo(object):
         sqlite_weibo["topics"] = weibo["topics"]
         sqlite_weibo["pics"] = weibo["pics"]
         sqlite_weibo["video_url"] = weibo["video_url"]
+        sqlite_weibo["live_photo_url"] = weibo["live_photo_url"]
         sqlite_weibo["location"] = weibo["location"]
         sqlite_weibo["created_at"] = weibo["full_created_at"]
         sqlite_weibo["source"] = weibo["source"]
@@ -2147,6 +2179,7 @@ class Weibo(object):
                     ,at_users varchar(1000)
                     ,pics varchar(3000)
                     ,video_url varchar(1000)
+                    ,live_photo_url varchar(1000)
                     ,location varchar(100)
                     ,created_at DATETIME
                     ,source varchar(30)
