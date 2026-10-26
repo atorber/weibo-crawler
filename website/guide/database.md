@@ -110,3 +110,41 @@ pip install pymongo
 ```
 
 爬虫在 MongoDB 中对应创建 `user` 与 `weibo` 两个集合（Collections），数据会自动根据用户 ID 与微博 ID 执行 Upsert（存在则更新，不存在则插入）。
+
+---
+
+## HTTP POST Webhook 实时推送
+
+若你希望将抓取到的新微博实时流式推送到自己的企业微信机器人、钉钉机器人或业务系统接口，可开启 Webhook 推送：
+
+```json
+{
+  "write_mode": ["post"],
+  "post_config": {
+    "api_url": "https://api.yourdomain.com/v1/weibo/webhook",
+    "api_token": "Bearer YOUR_SECRET_TOKEN"
+  }
+}
+```
+
+- **请求头**：系统在发起 POST 请求时会自动携带 `Authorization` 鉴权头与 `Content-Type: application/json`。
+- **Payload**：每次采集到微博时，推送包含用户信息与微博全量字段的 JSON 数据。
+
+---
+
+## ⚡ 存储介质一键连通性测试
+
+无论使用 MySQL、MongoDB 还是 Webhook，配置错误（如密码错误、端口未放行、URI 鉴权库不正确）往往要等到爬虫运行数分钟后才会报错。
+
+在 Web 控制台的 **「数据存储」** 页面中，每个卡片底部均内置了 **即时连通性测试引擎**：
+
+<div style="border-radius: 8px; overflow: hidden; margin: 18px 0; border: 1px solid var(--vp-c-divider);">
+  <img src="/images/console-storage.png" alt="连通性测试" style="width: 100%; display: block;" />
+</div>
+
+- **无需提前保存**：直接读取你当前在输入框中填写的参数，点击即可触发底层握手测试。
+- **即时反馈诊断**：
+  - **MySQL**：连接成功时反馈 MySQL 服务端版本号与延迟毫秒；失败时打印拒绝代码。
+  - **MongoDB**：执行内部 `ping` 与 `server_info`，测试 4 秒超时保护。
+  - **Webhook**：向接收端发送带有 Token 的 ping 包，精准反馈 HTTP 状态码（如 200 OK、401 Unauthorized、404 Not Found）及响应延迟。
+

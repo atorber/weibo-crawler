@@ -9,6 +9,10 @@
 - 📜 **实时日志终端**：黑客风格高亮终端，支持日志级别筛选、关键字过滤与自动滚屏
 - 🗄️ **数据检索预览**：随时检索浏览本地 SQLite 采集入库的历史微博记录
 
+<div style="border-radius: 8px; overflow: hidden; margin: 18px 0; border: 1px solid var(--vp-c-divider);">
+  <img src="/images/console-api.png" alt="RESTful API 接口中心" style="width: 100%; display: block;" />
+</div>
+
 ---
 
 ## 启动服务
@@ -31,6 +35,17 @@ gunicorn -w 4 -b 0.0.0.0:5000 service:app
 
 ---
 
-## 预配置与环境变量
+## Web 控制台独立页面路由
 
-在 `service.py` 文件内部，定义了默认的全局调度配置 `config`（包含用户列表、存储模式、SQLite 数据库路径等）。若需调整默认参数，可直接在 `service.py` 开头的配置项中修改。
+Web 控制台已内置标准化独立路由系统，支持在浏览器地址栏直接输入访问或添加书签：
+
+| 功能板块 | 独立路由地址 | 对应功能 |
+| :--- | :--- | :--- |
+| **总览控制** | `/` 或 `/dashboard` | 核心运行指标、Cookie 探测与进程调度 |
+| **目标管理** | `/targets` | 目标博主队列维护与单博主采集触发 |
+| **参数配置** | `/settings` | 爬虫参数调整与智能反封禁策略 |
+| **数据存储** | `/output` | 7 种数据输出介质配置与即时连通性测试 |
+| **实时日志** | `/logs` | 终端风格实时彩色流式日志 |
+| **数据预览** | `/data` | 多维筛选（博主/发布时间/关键字）历史微博 |
+| **API 文档** | `/api-docs` 或 `/docs` | 内置交互式 RESTful API 接口中心与 cURL 范例 |
+

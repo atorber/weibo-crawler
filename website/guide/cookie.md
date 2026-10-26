@@ -14,18 +14,41 @@ Cookie 是爬虫访问微博深层数据、突破反爬限频与维持长效爬�
 
 ---
 
-## 如何获取 Cookie
+## 两种获取 Cookie 方式
 
-1. 打开 Chrome、Edge 或 Safari 浏览器，访问移动版网页：[https://m.weibo.cn](https://m.weibo.cn) 或 [https://weibo.cn](https://weibo.cn) 并完成扫码登录。
-2. 按 `F12` 或右键点击“检查”，打开浏览器的 **开发者工具 (DevTools)**。
+### 方式一：Web 控制台一键从浏览器提取（推荐，零门槛）
+
+以往爬取微博最繁琐的步骤就是打开 F12 开发者工具、抓包复制漫长复杂的 Cookie 字符串。
+
+现在，控制台内置了**本地浏览器登录态自动探测引擎**：
+
+1. 启动并打开 Web 控制台（`python service.py`，访问 `http://127.0.0.1:5001`）。
+2. 在「总览控制」的 **Cookie 认证连通性检测** 区域，点击 **🌐 浏览器提取**。
+3. 弹出窗口将自动列出本地已安装的浏览器（支持 Chrome、Edge、Firefox、Safari、Brave 等）：
+   - 选择 **自动探测已登录浏览器** 或指定你的主力浏览器；
+   - 点击 **🚀 立即读取并验证**，系统将自动读取本地解密 Cookie，并向微博服务器发起鉴权握手。
+4. 验证通过后，将直接显示当前已认证的微博昵称、头像与 UID，并自动回写持久化至 `config.json`，全程无需手动复制粘贴！
+
+::: tip 安全与隐私说明
+该过程完全在本地计算机内部完成，Cookie 数据仅用于爬虫向微博官方 API 发送带有鉴权的 HTTP 请求，绝不上传任何第三方服务器。
+:::
+
+---
+
+### 方式二：手动从浏览器开发者工具复制（传统方式）
+
+如果你在没有图形界面的远程 Linux 服务器上操作，可采用手动复制方案：
+
+1. 在电脑浏览器中访问移动版网页：[https://m.weibo.cn](https://m.weibo.cn) 或 [https://weibo.com](https://weibo.com) 并完成扫码登录。
+2. 按 `F12`（Mac 按 `Cmd + Option + I`）打开浏览器的 **开发者工具 (DevTools)**。
 3. 切换到 **Network (网络)** 标签页。
-4. 刷新页面（按 `F5`），点击任意以 `m.weibo.cn` 或 `weibo.cn` 开头的请求条目。
+4. 刷新页面（按 `F5`），点击任意以 `m.weibo.cn` 开头的请求条目（如 `getIndex`）。
 5. 在右侧 **Headers (标头)** -> **Request Headers (请求标头)** 中，找到 `Cookie:` 字段。
-6. 复制该字段的完整值，粘贴到 `config.json` 的 `"cookie"` 配置项中：
+6. 复制该字段的完整值，填入控制台「参数配置」的 Cookie 输入框，或直接填入 `config.json` 的 `"cookie"` 项：
 
 ```json
 {
-  "cookie": "SUB=_2A25xxxx...; SUBP=0033...; _T_WM=123456;"
+  "cookie": "SCF=...; SUB=...; SUBP=...; ALF=...;"
 }
 ```
 

@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "Official documentation for Weibo Crawler",
   "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview"
