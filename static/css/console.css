@@ -1027,3 +1027,41 @@ input:checked + .slider:before {
   cursor: pointer;
   font-size: 0.9rem;
 }
+
+.settings-section-divider {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: 22px 0 14px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-inner-card {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-subtle);
+}
+
+.grid-2-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.grid-3-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.grid-4-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}

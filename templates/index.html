@@ -153,7 +153,10 @@
                 探针检测微博 Cookie 是否有效及登录账号画像
               </p>
             </div>
-            <button class="btn btn-secondary" id="btn-test-cookie-dash">🔍 即刻测试 Cookie</button>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn btn-secondary" id="btn-open-cookie-modal">🔑 更新 Cookie</button>
+              <button class="btn btn-secondary" id="btn-test-cookie-dash">🔍 即刻测试 Cookie</button>
+            </div>
           </div>
           <div style="padding: 20px 24px;">
             <div id="cookie-status-banner" style="font-size: 0.9rem; color: var(--text-muted);">
@@ -211,9 +214,10 @@
           <div class="settings-subnav">
             <button class="settings-tab-btn active" data-subtab="subtab-basic">基础采集设置</button>
             <button class="settings-tab-btn" data-subtab="subtab-cookie">Cookie 与安全</button>
-            <button class="settings-tab-btn" data-subtab="subtab-media">图片与多媒体</button>
+            <button class="settings-tab-btn" data-subtab="subtab-media">媒体与文件</button>
             <button class="settings-tab-btn" data-subtab="subtab-output">数据存储输出</button>
-            <button class="settings-tab-btn" data-subtab="subtab-advanced">高级与互动</button>
+            <button class="settings-tab-btn" data-subtab="subtab-advanced">评论转发互动</button>
+            <button class="settings-tab-btn" data-subtab="subtab-antiban">🛡️ 反封禁策略</button>
           </div>
 
           <div class="settings-panel-box">
@@ -244,6 +248,18 @@
               </div>
 
               <div class="form-group" style="margin-top: 18px;">
+                <label class="form-label">用户 ID 列表或文件 (user_id_list)</label>
+                <div class="form-desc">指定用户 ID 文件路径（如 user_id_list.txt）或逗号/换行分隔的多个用户 ID</div>
+                <input type="text" class="form-control" id="cfg-user-id-list" placeholder="user_id_list.txt 或 1669879400, 12345678" value="user_id_list.txt">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">数据输出根目录 (output_directory)</label>
+                <div class="form-desc">所有生成的文件、媒体以及报告统一存储的根目录名称（默认：weibo_data）</div>
+                <input type="text" class="form-control" id="cfg-output-dir" placeholder="weibo_data" value="weibo_data">
+              </div>
+
+              <div class="form-group">
                 <label class="form-label">采集起始时间 (since_date)</label>
                 <div class="form-desc">可以是日期格式（如 2024-01-01）或正整数天数（如 7 代表最近7天）</div>
                 <input type="text" class="form-control" id="cfg-since-date" placeholder="例如: 2024-01-01 或 7">
@@ -276,7 +292,7 @@
                   <label class="form-label" style="margin: 0;">微博 Cookie 字符串 (cookie)</label>
                   <button class="btn btn-secondary btn-sm" id="btn-check-cookie-settings">测试此 Cookie</button>
                 </div>
-                <div class="form-desc">在 m.weibo.cn 登录后从浏览器开发者工具网络面板复制的完整 Cookie</div>
+                <div class="form-desc">在 weibo.com 或 m.weibo.cn 登录后从浏览器网络面板复制的完整 Cookie</div>
                 <textarea class="form-control" id="cfg-cookie" rows="4" placeholder="SUB=...; SUBP=...;"></textarea>
               </div>
 
@@ -312,7 +328,7 @@
               <div class="switch-wrap">
                 <div class="switch-label-wrap">
                   <span class="switch-label-title">下载原创微博视频 (original_video_download)</span>
-                  <span class="switch-label-subtitle">保存高清 MP4 视频到本地</span>
+                  <span class="switch-label-subtitle">保存原创微博高清 MP4 视频到本地</span>
                 </div>
                 <label class="toggle-switch">
                   <input type="checkbox" id="cfg-orig-video">
@@ -322,11 +338,44 @@
 
               <div class="switch-wrap">
                 <div class="switch-label-wrap">
+                  <span class="switch-label-title">下载转发微博视频 (retweet_video_download)</span>
+                  <span class="switch-label-subtitle">保存转发微博中的高清视频文件</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-retweet-video">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="switch-wrap">
+                <div class="switch-label-wrap">
                   <span class="switch-label-title">提取原创 Live Photo 视频 (original_live_photo_download)</span>
-                  <span class="switch-label-subtitle">单独提取动态照片中的视频流</span>
+                  <span class="switch-label-subtitle">单独提取原创动态照片中的视频流</span>
                 </div>
                 <label class="toggle-switch">
                   <input type="checkbox" id="cfg-orig-livephoto">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="switch-wrap">
+                <div class="switch-label-wrap">
+                  <span class="switch-label-title">提取转发 Live Photo 视频 (retweet_live_photo_download)</span>
+                  <span class="switch-label-subtitle">单独提取转发动态照片中的视频流</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-retweet-livephoto">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="switch-wrap">
+                <div class="switch-label-wrap">
+                  <span class="switch-label-title">下载评论中附带的图片 (comment_pic_download)</span>
+                  <span class="switch-label-subtitle">抓取评论内容中用户上传的配图文件</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-comment-pic">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -340,6 +389,47 @@
                   <input type="checkbox" id="cfg-write-exif">
                   <span class="slider"></span>
                 </label>
+              </div>
+
+              <div class="switch-wrap">
+                <div class="switch-label-wrap">
+                  <span class="switch-label-title">同步修改文件系统时间 (change_file_time)</span>
+                  <span class="switch-label-subtitle">将本地下载的媒体文件系统创建/修改时间同步为微博发布时间</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-change-file-time">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <!-- Folder name mappings: download_folder_name -->
+              <div class="settings-section-divider">📁 本地媒体存储子目录名称映射 (download_folder_name)</div>
+              <div style="font-size: 0.82rem; color: var(--text-dim); margin-bottom: 12px;">自定义不同媒体类型在本地创建的存储子文件夹名称</div>
+              <div class="grid-3-col">
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">原创图片目录</label>
+                  <input type="text" class="form-control" id="cfg-df-orig-img" value="原创微博图片">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">转发图片目录</label>
+                  <input type="text" class="form-control" id="cfg-df-retweet-img" value="转发微博图片">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">原创视频目录</label>
+                  <input type="text" class="form-control" id="cfg-df-orig-video" value="原创微博视频">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">转发视频目录</label>
+                  <input type="text" class="form-control" id="cfg-df-retweet-video" value="转发微博视频">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">原创 LivePhoto 目录</label>
+                  <input type="text" class="form-control" id="cfg-df-orig-livephoto" value="原创微博Live Photo视频">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">转发 LivePhoto 目录</label>
+                  <input type="text" class="form-control" id="cfg-df-retweet-livephoto" value="转发微博Live Photo视频">
+                </div>
               </div>
             </div>
 
@@ -509,7 +599,16 @@
                     </select>
                   </div>
                 </div>
-                <div class="switch-wrap" style="margin-bottom: 0;">
+
+                <div class="form-group">
+                  <label class="form-label">图片与 Live Photo 排列模式 (markdown_image_order)</label>
+                  <select class="form-control" id="cfg-md-img-order">
+                    <option value="live_photo_first">Live Photo 排在图片前面 (live_photo_first)</option>
+                    <option value="image_first_interleaved">图片优先，同名 Live Photo 插入到对应图片下方 (image_first_interleaved)</option>
+                  </select>
+                </div>
+
+                <div class="switch-wrap">
                   <div class="switch-label-wrap">
                     <span class="switch-label-title">生成缺失微博排查报告 (missing_weibo_report)</span>
                     <span class="switch-label-subtitle">每次抓取结束后生成与上次相比缺失（被删除/被屏蔽）的微博报告</span>
@@ -518,6 +617,62 @@
                     <input type="checkbox" id="cfg-missing-report">
                     <span class="slider"></span>
                   </label>
+                </div>
+
+                <div class="settings-section-divider">🖼️ Markdown 内容嵌入预览开关 (markdown_preview)</div>
+                <div class="grid-4-col">
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-orig-img"> 原创图片预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-retweet-img"> 转发图片预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-inline-img"> 查看图片转预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-link"> 网页链接转预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-orig-video"> 原创视频预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-retweet-video"> 转发视频预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-orig-livephoto"> 原创 LivePhoto 预览
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-mdp-retweet-livephoto"> 转发 LivePhoto 预览
+                  </label>
+                </div>
+
+                <div class="settings-section-divider">📂 Markdown 内部媒体相对链接目录 (markdown_file_dir)</div>
+                <div class="grid-3-col">
+                  <div class="form-group">
+                    <label class="form-label" style="font-size: 0.82rem;">原创图片链接路径</label>
+                    <input type="text" class="form-control" id="cfg-mfd-orig-img" value="img">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" style="font-size: 0.82rem;">转发图片链接路径</label>
+                    <input type="text" class="form-control" id="cfg-mfd-retweet-img" value="img">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" style="font-size: 0.82rem;">原创视频链接路径</label>
+                    <input type="text" class="form-control" id="cfg-mfd-orig-video" value="原创微博视频">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" style="font-size: 0.82rem;">转发视频链接路径</label>
+                    <input type="text" class="form-control" id="cfg-mfd-retweet-video" value="转发微博视频">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" style="font-size: 0.82rem;">原创 LivePhoto 路径</label>
+                    <input type="text" class="form-control" id="cfg-mfd-orig-livephoto" value="原创微博Live Photo视频">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" style="font-size: 0.82rem;">转发 LivePhoto 路径</label>
+                    <input type="text" class="form-control" id="cfg-mfd-retweet-livephoto" value="转发微博Live Photo视频">
+                  </div>
                 </div>
               </div>
             </div>
@@ -529,7 +684,7 @@
               <div class="switch-wrap">
                 <div class="switch-label-wrap">
                   <span class="switch-label-title">下载一级评论 (download_comment)</span>
-                  <span class="switch-label-subtitle">抓取微博下方的一级评论（主要用于 SQLite 写入）</span>
+                  <span class="switch-label-subtitle">抓取微博下方的一级评论（主要用于 SQLite / CSV 写入）</span>
                 </div>
                 <label class="toggle-switch">
                   <input type="checkbox" id="cfg-download-comment">
@@ -539,18 +694,94 @@
 
               <div class="form-group" style="margin-top: 14px;">
                 <label class="form-label">单条微博最大评论抓取数量 (comment_max_download_count)</label>
-                <input type="number" class="form-control" id="cfg-comment-count" value="1000">
+                <input type="number" class="form-control" id="cfg-comment-count" value="100">
               </div>
 
               <div class="switch-wrap" style="margin-top: 20px;">
                 <div class="switch-label-wrap">
                   <span class="switch-label-title">下载转发链条 (download_repost)</span>
-                  <span class="switch-label-subtitle">抓取转发信息与转发理由</span>
+                  <span class="switch-label-subtitle">抓取微博转发历史与转发理由</span>
                 </div>
                 <label class="toggle-switch">
                   <input type="checkbox" id="cfg-download-repost">
                   <span class="slider"></span>
                 </label>
+              </div>
+
+              <div class="form-group" style="margin-top: 14px;">
+                <label class="form-label">单条微博最大转发抓取数量 (repost_max_download_count)</label>
+                <input type="number" class="form-control" id="cfg-repost-count" value="100">
+              </div>
+            </div>
+
+            <!-- Subtab 6: Anti-Ban Protection -->
+            <div class="settings-group-section" id="subtab-antiban">
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 18px;">🛡️ 智能反封禁与限频保护策略 (anti_ban_config)</h3>
+
+              <div class="switch-wrap">
+                <div class="switch-label-wrap">
+                  <span class="switch-label-title">启用智能反封禁防护引擎 (enabled)</span>
+                  <span class="switch-label-subtitle">根据会话时长、错误率自动触发动态延迟与间歇休息，规避账号被风控</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-ab-enabled">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="grid-2-col" style="margin-top: 16px;">
+                <div class="form-group">
+                  <label class="form-label">单次运行最大抓取微博数 (max_weibo_per_session)</label>
+                  <div class="form-desc">达到该数量后自动暂停，防止一次性爬取过多引发风控</div>
+                  <input type="number" class="form-control" id="cfg-ab-max-weibo" value="500">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">单次运行最长耗时 (max_session_time，秒)</label>
+                  <div class="form-desc">单次连续运行达到此秒数后强制休息（默认 600 秒 = 10分钟）</div>
+                  <input type="number" class="form-control" id="cfg-ab-max-time" value="600">
+                </div>
+              </div>
+
+              <div class="grid-2-col">
+                <div class="form-group">
+                  <label class="form-label">批次大小 (batch_size)</label>
+                  <div class="form-desc">每爬取指定条数的微博后执行批次延迟冷却</div>
+                  <input type="number" class="form-control" id="cfg-ab-batch-size" value="50">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">批次冷却延迟 (batch_delay，秒)</label>
+                  <div class="form-desc">每完成一个批次后的强制等待时间</div>
+                  <input type="number" class="form-control" id="cfg-ab-batch-delay" value="30">
+                </div>
+              </div>
+
+              <div class="grid-2-col">
+                <div class="form-group">
+                  <label class="form-label">请求动态延迟最小值 (request_delay_min，秒)</label>
+                  <input type="number" class="form-control" id="cfg-ab-delay-min" value="8">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">请求动态延迟最大值 (request_delay_max，秒)</label>
+                  <input type="number" class="form-control" id="cfg-ab-delay-max" value="15">
+                </div>
+              </div>
+
+              <div class="grid-3-col">
+                <div class="form-group">
+                  <label class="form-label">连续 API 错误上限 (max_api_errors)</label>
+                  <div class="form-desc">达到该错误次数触发休息冷却</div>
+                  <input type="number" class="form-control" id="cfg-ab-max-errors" value="5">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">触发休息暂停时长 (rest_time_min，秒)</label>
+                  <div class="form-desc">休息冷却暂停的秒数（默认 180 秒）</div>
+                  <input type="number" class="form-control" id="cfg-ab-rest-time" value="180">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">随机额外休息概率 (random_rest_probability)</label>
+                  <div class="form-desc">每次休息后随机额外延长的概率 (0~1)</div>
+                  <input type="number" step="0.01" min="0" max="1" class="form-control" id="cfg-ab-rest-prob" value="0.01">
+                </div>
               </div>
             </div>
           </div>
@@ -686,6 +917,26 @@
       <div class="modal-footer">
         <button class="btn btn-secondary modal-close" data-modal="modal-import-users">取消</button>
         <button class="btn btn-primary" id="btn-confirm-import">立即导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Quick Update Cookie -->
+  <div class="modal-overlay" id="modal-update-cookie">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.1rem; font-weight: 700;">🔑 快速更新微博 Cookie</h3>
+        <button class="btn-icon modal-close" data-modal="modal-update-cookie">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-desc" style="margin-bottom: 12px; line-height: 1.6;">
+          粘贴浏览器登录微博（建议 weibo.com 或 m.weibo.cn）后开发者工具中的完整 Cookie 字符串。保存后将自动同步更新 <code>config.json</code> 并即时生效。
+        </div>
+        <textarea class="form-control" id="quick-cookie-input" rows="6" placeholder="SUB=...; SUBP=...; _T_WM=..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary modal-close" data-modal="modal-update-cookie">取消</button>
+        <button class="btn btn-primary" id="btn-confirm-update-cookie">保存并测试</button>
       </div>
     </div>
   </div>

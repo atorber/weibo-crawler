@@ -233,8 +233,67 @@ function initControlButtons() {
   document.getElementById('btn-quick-restart').addEventListener('click', () => handleRestart());
   document.getElementById('btn-main-restart').addEventListener('click', () => handleRestart());
 
-  // Dashboard Cookie Test
+  // Dashboard Cookie Test & Update
   document.getElementById('btn-test-cookie-dash').addEventListener('click', runCookieCheck);
+
+  const openCookieBtn = document.getElementById('btn-open-cookie-modal');
+  if (openCookieBtn) {
+    openCookieBtn.addEventListener('click', () => {
+      const currentCookie = (state.currentConfig && state.currentConfig.cookie) || document.getElementById('cfg-cookie')?.value || '';
+      document.getElementById('quick-cookie-input').value = currentCookie;
+      openModal('modal-update-cookie');
+    });
+  }
+
+  const confirmCookieBtn = document.getElementById('btn-confirm-update-cookie');
+  if (confirmCookieBtn) {
+    confirmCookieBtn.addEventListener('click', async () => {
+      const newCookie = document.getElementById('quick-cookie-input').value.trim();
+      if (!newCookie) {
+        showToast('请输入有效的 Cookie 字符串', 'error');
+        return;
+      }
+
+      confirmCookieBtn.disabled = true;
+      confirmCookieBtn.textContent = '保存中...';
+
+      try {
+        // 1. 获取现有配置副本或从表单收集
+        const current = state.currentConfig ? { ...state.currentConfig } : collectConfigForm();
+        current.cookie = newCookie;
+
+        // 2. 发送更新配置请求
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parsed: current })
+        });
+        const json = await res.json();
+
+        if (json.code === 200) {
+          showToast('Cookie 保存成功，正在进行连通性检测...', 'success');
+          closeModal('modal-update-cookie');
+
+          // 同步参数配置页面的 Cookie 输入框
+          const cfgCookieInput = document.getElementById('cfg-cookie');
+          if (cfgCookieInput) cfgCookieInput.value = newCookie;
+
+          // 重新拉取配置
+          await fetchConfig();
+
+          // 3. 自动触发即刻测试
+          await runCookieCheck();
+        } else {
+          showToast(json.message || 'Cookie 保存失败', 'error');
+        }
+      } catch (e) {
+        showToast('更新 Cookie 异常: ' + e, 'error');
+      } finally {
+        confirmCookieBtn.disabled = false;
+        confirmCookieBtn.textContent = '保存并测试';
+      }
+    });
+  }
 }
 
 async function runCookieCheck() {
@@ -472,25 +531,41 @@ function updateWriteModeCardsVisibility() {
 function populateConfigForm(cfg) {
   if (!cfg) return;
 
-  // Basic
+  // 1. Basic
   document.getElementById('cfg-only-original').checked = (cfg.only_crawl_original === 1);
   document.getElementById('cfg-remove-html').checked = (cfg.remove_html_tag === 1);
+  const uidListVal = Array.isArray(cfg.user_id_list) ? cfg.user_id_list.join(', ') : (cfg.user_id_list || 'user_id_list.txt');
+  document.getElementById('cfg-user-id-list').value = uidListVal;
+  document.getElementById('cfg-output-dir').value = cfg.output_directory || 'weibo_data';
   document.getElementById('cfg-since-date').value = cfg.since_date || '';
   document.getElementById('cfg-end-date').value = cfg.end_date || '';
   document.getElementById('cfg-start-page').value = cfg.start_page || 1;
   document.getElementById('cfg-page-count').value = cfg.page_weibo_count || 20;
 
-  // Cookie
+  // 2. Cookie
   document.getElementById('cfg-cookie').value = cfg.cookie || '';
 
-  // Media
+  // 3. Media
   document.getElementById('cfg-orig-pic').checked = (cfg.original_pic_download === 1);
   document.getElementById('cfg-retweet-pic').checked = (cfg.retweet_pic_download === 1);
   document.getElementById('cfg-orig-video').checked = (cfg.original_video_download === 1);
+  document.getElementById('cfg-retweet-video').checked = (cfg.retweet_video_download === 1);
   document.getElementById('cfg-orig-livephoto').checked = (cfg.original_live_photo_download === 1);
+  document.getElementById('cfg-retweet-livephoto').checked = (cfg.retweet_live_photo_download === 1);
+  document.getElementById('cfg-comment-pic').checked = (cfg.comment_pic_download === 1);
   document.getElementById('cfg-write-exif').checked = (cfg.write_time_in_exif === 1);
+  document.getElementById('cfg-change-file-time').checked = (cfg.change_file_time !== 0);
 
-  // Write mode
+  // Folder name mapping (download_folder_name)
+  const df = cfg.download_folder_name || {};
+  document.getElementById('cfg-df-orig-img').value = df.original_image_folder || '原创微博图片';
+  document.getElementById('cfg-df-retweet-img').value = df.retweet_image_folder || '转发微博图片';
+  document.getElementById('cfg-df-orig-video').value = df.original_video_folder || '原创微博视频';
+  document.getElementById('cfg-df-retweet-video').value = df.retweet_video_folder || '转发微博视频';
+  document.getElementById('cfg-df-orig-livephoto').value = df.original_live_photo_folder || '原创微博Live Photo视频';
+  document.getElementById('cfg-df-retweet-livephoto').value = df.retweet_live_photo_folder || '转发微博Live Photo视频';
+
+  // 4. Write mode & outputs
   const writeModes = Array.isArray(cfg.write_mode) ? cfg.write_mode : [];
   document.querySelectorAll('.cfg-writemode-cb').forEach(cb => {
     cb.checked = writeModes.includes(cb.value);
@@ -521,22 +596,65 @@ function populateConfigForm(cfg) {
   // Markdown
   if (cfg.markdown_split_by) document.getElementById('cfg-md-split').value = cfg.markdown_split_by;
   if (cfg.markdown_sort_order) document.getElementById('cfg-md-order').value = cfg.markdown_sort_order;
+  if (cfg.markdown_image_order) document.getElementById('cfg-md-img-order').value = cfg.markdown_image_order;
   document.getElementById('cfg-missing-report').checked = (cfg.missing_weibo_report === 1);
+
+  // Markdown preview syntax
+  const mdp = cfg.markdown_preview || {};
+  document.getElementById('cfg-mdp-orig-img').checked = (mdp.original_image_preview !== 0);
+  document.getElementById('cfg-mdp-retweet-img').checked = (mdp.retweet_image_preview !== 0);
+  document.getElementById('cfg-mdp-inline-img').checked = (mdp.inline_image_preview !== 0);
+  document.getElementById('cfg-mdp-link').checked = (mdp.link_preview === 1);
+  document.getElementById('cfg-mdp-orig-video').checked = (mdp.original_video_preview === 1);
+  document.getElementById('cfg-mdp-retweet-video').checked = (mdp.retweet_video_preview === 1);
+  document.getElementById('cfg-mdp-orig-livephoto').checked = (mdp.original_live_photo_preview === 1);
+  document.getElementById('cfg-mdp-retweet-livephoto').checked = (mdp.retweet_live_photo_preview === 1);
+
+  // Markdown relative link directory
+  const mfd = cfg.markdown_file_dir || {};
+  document.getElementById('cfg-mfd-orig-img').value = mfd.original_image_dir || 'img';
+  document.getElementById('cfg-mfd-retweet-img').value = mfd.retweet_image_dir || 'img';
+  document.getElementById('cfg-mfd-orig-video').value = mfd.original_video_dir || '原创微博视频';
+  document.getElementById('cfg-mfd-retweet-video').value = mfd.retweet_video_dir || '转发微博视频';
+  document.getElementById('cfg-mfd-orig-livephoto').value = mfd.original_live_photo_dir || '原创微博Live Photo视频';
+  document.getElementById('cfg-mfd-retweet-livephoto').value = mfd.retweet_live_photo_dir || '转发微博Live Photo视频';
+
+  // 5. Advanced & Interactions
+  document.getElementById('cfg-download-comment').checked = (cfg.download_comment === 1);
+  document.getElementById('cfg-comment-count').value = cfg.comment_max_download_count || 100;
+  document.getElementById('cfg-download-repost').checked = (cfg.download_repost === 1);
+  document.getElementById('cfg-repost-count').value = cfg.repost_max_download_count || 100;
+
+  // 6. Anti-Ban Protection
+  const ab = cfg.anti_ban_config || {};
+  document.getElementById('cfg-ab-enabled').checked = (ab.enabled !== false);
+  document.getElementById('cfg-ab-max-weibo').value = ab.max_weibo_per_session !== undefined ? ab.max_weibo_per_session : 500;
+  document.getElementById('cfg-ab-batch-size').value = ab.batch_size !== undefined ? ab.batch_size : 50;
+  document.getElementById('cfg-ab-batch-delay').value = ab.batch_delay !== undefined ? ab.batch_delay : 30;
+  document.getElementById('cfg-ab-delay-min').value = ab.request_delay_min !== undefined ? ab.request_delay_min : 8;
+  document.getElementById('cfg-ab-delay-max').value = ab.request_delay_max !== undefined ? ab.request_delay_max : 15;
+  document.getElementById('cfg-ab-max-time').value = ab.max_session_time !== undefined ? ab.max_session_time : 600;
+  document.getElementById('cfg-ab-max-errors').value = ab.max_api_errors !== undefined ? ab.max_api_errors : 5;
+  document.getElementById('cfg-ab-rest-time').value = ab.rest_time_min !== undefined ? ab.rest_time_min : 180;
+  document.getElementById('cfg-ab-rest-prob').value = ab.random_rest_probability !== undefined ? ab.random_rest_probability : 0.01;
 
   // Update card visibility
   updateWriteModeCardsVisibility();
-
-  // Advanced
-  document.getElementById('cfg-download-comment').checked = (cfg.download_comment === 1);
-  document.getElementById('cfg-comment-count').value = cfg.comment_max_download_count || 1000;
-  document.getElementById('cfg-download-repost').checked = (cfg.download_repost === 1);
 }
 
 function collectConfigForm() {
   const cfg = state.currentConfig ? { ...state.currentConfig } : {};
 
+  // 1. Basic
   cfg.only_crawl_original = document.getElementById('cfg-only-original').checked ? 1 : 0;
   cfg.remove_html_tag = document.getElementById('cfg-remove-html').checked ? 1 : 0;
+  const uidRaw = document.getElementById('cfg-user-id-list').value.trim();
+  if (uidRaw.includes(',') || uidRaw.includes('\n')) {
+    cfg.user_id_list = uidRaw.split(/[\s,]+/).filter(Boolean);
+  } else {
+    cfg.user_id_list = uidRaw || 'user_id_list.txt';
+  }
+  cfg.output_directory = document.getElementById('cfg-output-dir').value.trim() || 'weibo_data';
 
   const sinceVal = document.getElementById('cfg-since-date').value.trim();
   cfg.since_date = /^\d+$/.test(sinceVal) ? parseInt(sinceVal, 10) : sinceVal;
@@ -545,14 +663,30 @@ function collectConfigForm() {
   cfg.start_page = parseInt(document.getElementById('cfg-start-page').value, 10) || 1;
   cfg.page_weibo_count = parseInt(document.getElementById('cfg-page-count').value, 10) || 20;
 
+  // 2. Cookie
   cfg.cookie = document.getElementById('cfg-cookie').value.trim();
 
+  // 3. Media
   cfg.original_pic_download = document.getElementById('cfg-orig-pic').checked ? 1 : 0;
   cfg.retweet_pic_download = document.getElementById('cfg-retweet-pic').checked ? 1 : 0;
   cfg.original_video_download = document.getElementById('cfg-orig-video').checked ? 1 : 0;
+  cfg.retweet_video_download = document.getElementById('cfg-retweet-video').checked ? 1 : 0;
   cfg.original_live_photo_download = document.getElementById('cfg-orig-livephoto').checked ? 1 : 0;
+  cfg.retweet_live_photo_download = document.getElementById('cfg-retweet-livephoto').checked ? 1 : 0;
+  cfg.comment_pic_download = document.getElementById('cfg-comment-pic').checked ? 1 : 0;
   cfg.write_time_in_exif = document.getElementById('cfg-write-exif').checked ? 1 : 0;
+  cfg.change_file_time = document.getElementById('cfg-change-file-time').checked ? 1 : 0;
 
+  cfg.download_folder_name = {
+    original_image_folder: document.getElementById('cfg-df-orig-img').value.trim() || '原创微博图片',
+    retweet_image_folder: document.getElementById('cfg-df-retweet-img').value.trim() || '转发微博图片',
+    original_video_folder: document.getElementById('cfg-df-orig-video').value.trim() || '原创微博视频',
+    retweet_video_folder: document.getElementById('cfg-df-retweet-video').value.trim() || '转发微博视频',
+    original_live_photo_folder: document.getElementById('cfg-df-orig-livephoto').value.trim() || '原创微博Live Photo视频',
+    retweet_live_photo_folder: document.getElementById('cfg-df-retweet-livephoto').value.trim() || '转发微博Live Photo视频'
+  };
+
+  // 4. Write mode & Outputs
   const modes = [];
   document.querySelectorAll('.cfg-writemode-cb:checked').forEach(cb => {
     modes.push(cb.value);
@@ -585,12 +719,50 @@ function collectConfigForm() {
   // Markdown
   cfg.markdown_split_by = document.getElementById('cfg-md-split').value;
   cfg.markdown_sort_order = document.getElementById('cfg-md-order').value;
+  cfg.markdown_image_order = document.getElementById('cfg-md-img-order').value;
   cfg.missing_weibo_report = document.getElementById('cfg-missing-report').checked ? 1 : 0;
 
-  // Advanced
+  cfg.markdown_preview = {
+    link_preview: document.getElementById('cfg-mdp-link').checked ? 1 : 0,
+    original_video_preview: document.getElementById('cfg-mdp-orig-video').checked ? 1 : 0,
+    retweet_video_preview: document.getElementById('cfg-mdp-retweet-video').checked ? 1 : 0,
+    original_image_preview: document.getElementById('cfg-mdp-orig-img').checked ? 1 : 0,
+    retweet_image_preview: document.getElementById('cfg-mdp-retweet-img').checked ? 1 : 0,
+    original_live_photo_preview: document.getElementById('cfg-mdp-orig-livephoto').checked ? 1 : 0,
+    retweet_live_photo_preview: document.getElementById('cfg-mdp-retweet-livephoto').checked ? 1 : 0,
+    inline_image_preview: document.getElementById('cfg-mdp-inline-img').checked ? 1 : 0
+  };
+
+  cfg.markdown_file_dir = {
+    original_image_dir: document.getElementById('cfg-mfd-orig-img').value.trim() || 'img',
+    retweet_image_dir: document.getElementById('cfg-mfd-retweet-img').value.trim() || 'img',
+    original_video_dir: document.getElementById('cfg-mfd-orig-video').value.trim() || '原创微博视频',
+    retweet_video_dir: document.getElementById('cfg-mfd-retweet-video').value.trim() || '转发微博视频',
+    original_live_photo_dir: document.getElementById('cfg-mfd-orig-livephoto').value.trim() || '原创微博Live Photo视频',
+    retweet_live_photo_dir: document.getElementById('cfg-mfd-retweet-livephoto').value.trim() || '转发微博Live Photo视频'
+  };
+
+  // 5. Advanced & Interactions
   cfg.download_comment = document.getElementById('cfg-download-comment').checked ? 1 : 0;
-  cfg.comment_max_download_count = parseInt(document.getElementById('cfg-comment-count').value, 10) || 1000;
+  cfg.comment_max_download_count = parseInt(document.getElementById('cfg-comment-count').value, 10) || 100;
   cfg.download_repost = document.getElementById('cfg-download-repost').checked ? 1 : 0;
+  cfg.repost_max_download_count = parseInt(document.getElementById('cfg-repost-count').value, 10) || 100;
+
+  // 6. Anti-Ban Protection
+  const prevAb = (state.currentConfig && state.currentConfig.anti_ban_config) || {};
+  cfg.anti_ban_config = {
+    ...prevAb,
+    enabled: document.getElementById('cfg-ab-enabled').checked,
+    max_weibo_per_session: parseInt(document.getElementById('cfg-ab-max-weibo').value, 10) || 500,
+    batch_size: parseInt(document.getElementById('cfg-ab-batch-size').value, 10) || 50,
+    batch_delay: parseInt(document.getElementById('cfg-ab-batch-delay').value, 10) || 30,
+    request_delay_min: parseInt(document.getElementById('cfg-ab-delay-min').value, 10) || 8,
+    request_delay_max: parseInt(document.getElementById('cfg-ab-delay-max').value, 10) || 15,
+    max_session_time: parseInt(document.getElementById('cfg-ab-max-time').value, 10) || 600,
+    max_api_errors: parseInt(document.getElementById('cfg-ab-max-errors').value, 10) || 5,
+    rest_time_min: parseInt(document.getElementById('cfg-ab-rest-time').value, 10) || 180,
+    random_rest_probability: parseFloat(document.getElementById('cfg-ab-rest-prob').value) || 0.01
+  };
 
   return cfg;
 }

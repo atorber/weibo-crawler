@@ -187,31 +187,14 @@ class Weibo(object):
         elif os.environ.get("WEIBO_COOKIE"):
             logger.info("使用环境变量WEIBO_COOKIE中的Cookie")
         
-        core_cookies = {}   # 核心包
-        backup_cookies = {} # 备份
-        # Cookie清洗：提取核心字段。若后续预热失败，则回退使用原版 _T_WM/XSRF-TOKEN
-        if cookie_string and "SUB=" in cookie_string:
-            # 1. 提取核心 SUB
-            match_sub = re.search(r'SUB=(.*?)(;|$)', cookie_string)
-            if match_sub:
-                core_cookies['SUB'] = match_sub.group(1)
-            
-            # 2. 提取备份指纹
-            match_twm = re.search(r'_T_WM=(.*?)(;|$)', cookie_string)
-            if match_twm:
-                backup_cookies['_T_WM'] = match_twm.group(1)
-            
-            match_xsrf = re.search(r'XSRF-TOKEN=(.*?)(;|$)', cookie_string)
-            if match_xsrf:
-                backup_cookies['XSRF-TOKEN'] = match_xsrf.group(1)
-        
-        # 保底：如果没有提取到 SUB，说明格式特殊，全量加载
-        if not core_cookies and cookie_string:
+        # 全量加载 Cookie 键值对，保证对 weibo.com 和 m.weibo.cn 的访问均具备完整认证凭据
+        full_cookies = {}
+        if cookie_string:
             for pair in cookie_string.split(';'):
                 if '=' in pair:
                     key, value = pair.split('=', 1)
-                    core_cookies[key.strip()] = value.strip()
-                    
+                    full_cookies[key.strip()] = value.strip()
+
         self.headers = {
             'Referer': 'https://m.weibo.cn/',  # 修正 Referer 为 m.weibo.cn
             'accept': 'application/json, text/plain, */*',
@@ -238,7 +221,7 @@ class Weibo(object):
         
         user_id_list = config["user_id_list"]
         requests_session = requests.Session()
-        requests_session.cookies.update(core_cookies)
+        requests_session.cookies.update(full_cookies)
 
         self.session = requests_session
         try:
@@ -653,6 +636,12 @@ class Weibo(object):
         url = "https://m.weibo.cn/api/container/getIndex?"
         try:
             r = self.session.get(url, params=params, headers=self.headers, verify=False, timeout=10)
+            if not r.text.strip():
+                logger.warning("get_json 收到空响应 (可能是未认证或限频)")
+                return {}, r.status_code
+            if r.text.strip().startswith("<"):
+                logger.warning(f"get_json 收到 HTML 页面响应 (HTTP {r.status_code})，未能解析为 JSON")
+                return {}, r.status_code
             r.raise_for_status()
             response_json = r.json()
             return response_json, r.status_code
@@ -719,6 +708,8 @@ class Weibo(object):
         retries = 0
         backoff_factor = 5
 
+        uid = str(self.user_config["user_id"])
+
         while retries < max_retries:
             try:
                 # 防封禁：使用随机请求头
@@ -730,10 +721,41 @@ class Weibo(object):
                     logger.debug(f"动态延迟: {delay:.1f} 秒")
                     sleep(delay)
 
-                response = self.session.get(url, params=params, headers=current_headers, timeout=10)
-                if response.status_code in (403, 414, 432) or not response.text.strip():
-                    raise ValueError(f"微博服务器拒绝未登录请求 (HTTP {response.status_code})。请在 Web 控制台「参数配置」填入有效微博 Cookie")
-                js = response.json()
+                js = {}
+                # 渠道 1: 优先尝试移动端 m.weibo.cn 接口
+                try:
+                    response = self.session.get(url, params=params, headers=current_headers, timeout=10)
+                    resp_text = response.text.strip()
+                    if response.status_code == 200 and resp_text and not resp_text.startswith("<"):
+                        js = response.json()
+                except Exception as ex:
+                    logger.debug(f"m.weibo.cn 页面 {page} 初次请求异常: {ex}")
+
+                # 渠道 2: 如果移动端接口返回空、错误或重定向至登录页，启用 weibo.com PC 端 timeline API 保底
+                if not js or not js.get("data") or "cards" not in js.get("data", {}):
+                    try:
+                        pc_headers = {
+                            "Referer": f"https://weibo.com/u/{uid}",
+                            "accept": "application/json, text/plain, */*",
+                            "user-agent": current_headers.get("user-agent", self.headers.get("user-agent"))
+                        }
+                        pc_url = f"https://weibo.com/ajax/statuses/mymblog?uid={uid}&page={page}&feature=0"
+                        pc_resp = self.session.get(pc_url, headers=pc_headers, timeout=10)
+                        if pc_resp.status_code == 200 and pc_resp.text.strip().startswith("{"):
+                            pc_data = pc_resp.json()
+                            if pc_data.get("ok") == 1 and "data" in pc_data and "list" in pc_data["data"]:
+                                raw_list = pc_data["data"]["list"]
+                                cards = []
+                                for mblog in raw_list:
+                                    if "bid" not in mblog:
+                                        mblog["bid"] = mblog.get("mblogid") or str(mblog.get("id"))
+                                    cards.append({"card_type": 9, "mblog": mblog})
+                                js = {"ok": 1, "data": {"cards": cards, "since_id": pc_data["data"].get("since_id")}}
+                                logger.info(f"成功获取到页面 {page} 的数据 (通过 PC 接口通道，共 {len(cards)} 条)。")
+                                self.update_crawl_stats(request_count=1)
+                                return js
+                    except Exception as pc_ex:
+                        logger.debug(f"PC 接口通道获取页面 {page} 失败: {pc_ex}")
 
                 # 更新统计：成功请求
                 self.update_crawl_stats(request_count=1)
@@ -752,8 +774,8 @@ class Weibo(object):
                         sys.exit()
             except RequestException as e:
                 retries += 1
-                sleep_time = backoff_factor * (2 ** retries)
-                logger.error(f"请求失败，错误信息：{e}。等待 {sleep_time} 秒后重试...")
+                sleep_time = min(backoff_factor * (1.5 ** retries), 30)
+                logger.error(f"请求失败，错误信息：{e}。等待 {sleep_time:.1f} 秒后重试...")
                 sleep(sleep_time)
                 # 更新统计：API错误
                 self.update_crawl_stats(api_error=True)
@@ -763,8 +785,8 @@ class Weibo(object):
                     logger.error(f"❌ 关键认证错误: {err_str}")
                     return {}
                 retries += 1
-                sleep_time = backoff_factor * (2 ** retries)
-                logger.error(f"JSON 解码失败，错误信息：{ve}。等待 {sleep_time} 秒后重试...")
+                sleep_time = min(backoff_factor * (1.5 ** retries), 30)
+                logger.error(f"响应解析失败: {ve}。等待 {sleep_time:.1f} 秒后重试...")
                 sleep(sleep_time)
                 # 更新统计：API错误
                 self.update_crawl_stats(api_error=True)
@@ -913,12 +935,72 @@ class Weibo(object):
                     logger.debug(f"动态延迟: {delay:.1f} 秒")
                     sleep(delay)
 
-                response = self.session.get(url, params=params, headers=current_headers, timeout=10)
-                if response.status_code in (403, 414, 432) or not response.text.strip():
-                    raise ValueError(f"微博服务器拒绝未登录请求 (HTTP {response.status_code})。该博主({self.user_config['user_id']})需要登录 Cookie 或请求触发了反爬限频，请在 Web 控制台「参数配置」填入有效 Cookie")
-                js = response.json()
-                if js.get("ok") == -100:
-                    raise ValueError(f"微博返回需要登录跳转 (ok: -100)。请在 Web 控制台「参数配置」->「Cookie 与安全」中填入当前登录的有效 Cookie")
+                uid = str(self.user_config["user_id"])
+                js = {}
+                
+                # 渠道 1: 优先尝试 m.weibo.cn 接口
+                try:
+                    response = self.session.get(url, params=params, headers=current_headers, timeout=10)
+                    resp_text = response.text.strip()
+                    if response.status_code == 200 and resp_text and not resp_text.startswith("<"):
+                        js = response.json()
+                except Exception as ex:
+                    logger.debug(f"m.weibo.cn 获取用户信息初次尝试异常: {ex}")
+
+                # 渠道 2: 如果 m.weibo.cn 返回未登录或 HTML 拦截页，启用 weibo.com PC 端 Profile API 双通道保底
+                if not js or not js.get("data") or "userInfo" not in js.get("data", {}):
+                    try:
+                        pc_headers = {
+                            "Referer": f"https://weibo.com/u/{uid}",
+                            "accept": "application/json, text/plain, */*",
+                            "user-agent": current_headers.get("user-agent", self.headers.get("user-agent"))
+                        }
+                        pc_resp = self.session.get(f"https://weibo.com/ajax/profile/info?uid={uid}", headers=pc_headers, timeout=10)
+                        if pc_resp.status_code == 200 and pc_resp.text.strip().startswith("{"):
+                            pc_js = pc_resp.json()
+                            if pc_js.get("ok") == 1 and "data" in pc_js and "user" in pc_js["data"]:
+                                pc_u = pc_js["data"]["user"]
+                                # 进一步尝试获取详情（籍贯、生日、教育等）
+                                pc_detail = {}
+                                try:
+                                    det_resp = self.session.get(f"https://weibo.com/ajax/profile/detail?uid={uid}", headers=pc_headers, timeout=10)
+                                    if det_resp.status_code == 200 and det_resp.text.strip().startswith("{"):
+                                        pc_detail = det_resp.json().get("data", {})
+                                except Exception:
+                                    pass
+
+                                user_info = OrderedDict()
+                                user_info["id"] = uid
+                                user_info["screen_name"] = pc_u.get("screen_name", "")
+                                user_info["gender"] = "男" if pc_u.get("gender") == "m" else ("女" if pc_u.get("gender") == "f" else "")
+                                user_info["birthday"] = str(pc_detail.get("birthday", "") or "")
+                                user_info["location"] = str(pc_detail.get("location", "") or pc_u.get("location", "") or "")
+                                user_info["ip_location"] = str(pc_detail.get("ip_location", "") or "")
+                                edu = pc_detail.get("education", {})
+                                user_info["education"] = edu.get("school", "") if isinstance(edu, dict) else str(edu or "")
+                                user_info["company"] = str(pc_detail.get("company", "") or "")
+                                user_info["registration_time"] = str(pc_detail.get("created_at", "") or "")
+                                sunshine = pc_detail.get("sunshine_credit", {})
+                                user_info["sunshine"] = sunshine.get("level", "") if isinstance(sunshine, dict) else str(sunshine or "")
+                                user_info["statuses_count"] = int(pc_u.get("statuses_count", 0))
+                                user_info["followers_count"] = int(pc_u.get("followers_count", 0))
+                                user_info["follow_count"] = int(pc_u.get("friends_count", 0))
+                                user_info["description"] = pc_u.get("description", "")
+                                user_info["profile_url"] = f"https://weibo.com/u/{uid}"
+                                user_info["profile_image_url"] = pc_u.get("avatar_large", "")
+                                user_info["avatar_hd"] = pc_u.get("avatar_hd", "")
+                                user_info["urank"] = pc_u.get("urank", 0) or 0
+                                user_info["mbrank"] = pc_u.get("mbrank", 0) or 0
+                                user_info["verified"] = pc_u.get("verified", False)
+                                user_info["verified_type"] = pc_u.get("verified_type", -1)
+                                user_info["verified_reason"] = pc_u.get("verified_reason", "")
+                                self.user = self.standardize_info(user_info)
+                                self.user_to_database()
+                                self.update_crawl_stats(request_count=1)
+                                logger.info(f"成功获取到用户 {self.user_config['user_id']} 的信息 (通过 PC 接口通道)。")
+                                return 0
+                    except Exception as pc_err:
+                        logger.debug(f"PC 接口通道获取用户信息失败: {pc_err}")
 
                 # 更新统计：成功请求
                 self.update_crawl_stats(request_count=1)
@@ -946,9 +1028,9 @@ class Weibo(object):
                     ]
                     for i in en_list:
                         user_info[i] = ""
-                    js, _ = self.get_json(params)
-                    if js["ok"]:
-                        cards = js["data"]["cards"]
+                    js_info, _ = self.get_json(params)
+                    if js_info and js_info.get("ok"):
+                        cards = js_info["data"]["cards"]
                         if isinstance(cards, list) and len(cards) > 1:
                             card_list = cards[0]["card_group"] + cards[1]["card_group"]
                             for card in card_list:
@@ -989,12 +1071,15 @@ class Weibo(object):
                     logger.warning("未能获取到用户信息，可能账号已注销或用户id有误。")
                     return 1
                 else:
-                    logger.warning("未能获取到用户信息。")
-                    return 1
+                    logger.warning(f"未能获取到用户 {self.user_config['user_id']} 信息，响应异常。进行重试...")
+                    retries += 1
+                    sleep_time = min(backoff_factor * (1.5 ** retries), 30)
+                    sleep(sleep_time)
+                    continue
             except RequestException as e:
                 retries += 1
-                sleep_time = backoff_factor * (2 ** retries)
-                logger.error(f"请求失败，错误信息：{e}。等待 {sleep_time} 秒后重试...")
+                sleep_time = min(backoff_factor * (1.5 ** retries), 30)
+                logger.error(f"请求失败，错误信息：{e}。等待 {sleep_time:.1f} 秒后重试...")
                 sleep(sleep_time)
                 # 更新统计：API错误
                 self.update_crawl_stats(api_error=True)
@@ -1004,8 +1089,8 @@ class Weibo(object):
                     logger.error(f"❌ 关键认证错误: {err_str}")
                     return 1
                 retries += 1
-                sleep_time = backoff_factor * (2 ** retries)
-                logger.error(f"JSON 解码失败，错误信息：{ve}。等待 {sleep_time} 秒后重试...")
+                sleep_time = min(backoff_factor * (1.5 ** retries), 30)
+                logger.error(f"JSON 解码失败，错误信息：{ve}。等待 {sleep_time:.1f} 秒后重试...")
                 sleep(sleep_time)
                 # 更新统计：API错误
                 self.update_crawl_stats(api_error=True)
@@ -1013,21 +1098,42 @@ class Weibo(object):
         sys.exit("超过最大重试次数，程序已退出。")
 
     def get_long_weibo(self, id):
-        """获取长微博"""
+        """获取长微博（优先使用官方 longtext 接口，保底使用移动端详情页解析）"""
+        # 通道 1：官方 longtext API（最稳定、无 HTML 拦截）
+        try:
+            pc_headers = {
+                "Referer": "https://weibo.com/",
+                "accept": "application/json, text/plain, */*",
+                "user-agent": self.headers.get("user-agent")
+            }
+            res = self.session.get(f"https://weibo.com/ajax/statuses/longtext?id={id}", headers=pc_headers, timeout=10)
+            if res.status_code == 200 and res.text.strip().startswith("{"):
+                js = res.json()
+                if js.get("ok") == 1 and "data" in js:
+                    long_text = js["data"].get("longTextContent", "")
+                    if long_text:
+                        return {"text": long_text, "id": id}
+        except Exception as e:
+            logger.debug(f"longtext API 获取长微博失败，尝试详情页: {e}")
+
+        # 通道 2：移动端详情页解析备用
         url = "https://m.weibo.cn/detail/%s" % id
-        logger.info(f"""URL: {url} """)
-        for i in range(5):
-            sleep(random.uniform(1.0, 2.5))
-            html = self.session.get(url, headers=self.headers, verify=False).text
-            html = html[html.find('"status":') :]
-            html = html[: html.rfind('"call"')]
-            html = html[: html.rfind(",")]
-            html = "{" + html + "}"
-            js = json.loads(html, strict=False)
-            weibo_info = js.get("status")
-            if weibo_info:
-                weibo = self.parse_weibo(weibo_info)
-                return weibo
+        for i in range(2):
+            try:
+                sleep(random.uniform(0.5, 1.5))
+                resp = self.session.get(url, headers=self.headers, verify=False, timeout=10)
+                html = resp.text
+                if '"status":' in html:
+                    html_sub = html[html.find('"status":') :]
+                    html_sub = html_sub[: html_sub.rfind('"call"')]
+                    html_sub = html_sub[: html_sub.rfind(",")]
+                    js = json.loads("{" + html_sub + "}", strict=False)
+                    weibo_info = js.get("status")
+                    if weibo_info:
+                        return self.parse_weibo(weibo_info)
+            except Exception:
+                pass
+        return None
 
     def get_pics(self, weibo_info):
         """获取微博原始图片url"""
@@ -1846,30 +1952,28 @@ class Weibo(object):
             if retweeted_status and retweeted_status.get("id"):  # 转发
                 retweet_id = retweeted_status.get("id")
                 is_long_retweet = retweeted_status.get("isLongText")
+                weibo = self.parse_weibo(weibo_info)
                 if is_long:
-                    weibo = self.get_long_weibo(weibo_id)
-                    if not weibo:
-                        weibo = self.parse_weibo(weibo_info)
-                else:
-                    weibo = self.parse_weibo(weibo_info)
+                    long_data = self.get_long_weibo(weibo_id)
+                    if long_data and long_data.get("text"):
+                        weibo["text"] = long_data["text"]
+                
+                retweet = self.parse_weibo(retweeted_status)
                 if is_long_retweet:
-                    retweet = self.get_long_weibo(retweet_id)
-                    if not retweet:
-                        retweet = self.parse_weibo(retweeted_status)
-                else:
-                    retweet = self.parse_weibo(retweeted_status)
+                    retweet_long = self.get_long_weibo(retweet_id)
+                    if retweet_long and retweet_long.get("text"):
+                        retweet["text"] = retweet_long["text"]
                 (
                     retweet["created_at"],
                     retweet["full_created_at"],
                 ) = self.standardize_date(retweeted_status["created_at"])
                 weibo["retweet"] = retweet
             else:  # 原创
+                weibo = self.parse_weibo(weibo_info)
                 if is_long:
-                    weibo = self.get_long_weibo(weibo_id)
-                    if not weibo:
-                        weibo = self.parse_weibo(weibo_info)
-                else:
-                    weibo = self.parse_weibo(weibo_info)
+                    long_data = self.get_long_weibo(weibo_id)
+                    if long_data and long_data.get("text"):
+                        weibo["text"] = long_data["text"]
             weibo["created_at"], weibo["full_created_at"] = self.standardize_date(
                 weibo_info["created_at"]
             )
