@@ -210,26 +210,55 @@ python skills/weibo-viewer/scripts/weibo_ctl.py cookie --extract --browser chrom
 
 ## 🤖 在 Agent 框架中接入使用
 
-### 1. Antigravity IDE / CLI
-项目在初始化时已在 `.agents/skills/weibo-viewer` 建立了软链接。在 Antigravity 中，只要用户提问与“爬取微博”、“查看某博主发文”、“搜索微博热点”相关，Agent 会**自动激活**本 Skill 并利用 `weibo_ctl.py` 协助完成任务。
+很多传统的工具扩展需要针对不同的平台编写繁琐割裂的配置文件（如 `.cursorrules`、`CLAUDE.md`、Function Calling JSON Schema 等）。
 
-### 2. LangChain / AutoGen / 自定义大模型
-可将 `skills/weibo-viewer/scripts/weibo_ctl.py` 包装为一个标准 Tool / Function Call：
+而在本项目中，**告别任何繁琐配置！任何国内外主流 Agent（无论是 Cursor、Claude Code、Codex、WorkBuddy、Antigravity，还是扣子 Coze、Dify、Windsurf 等），都原生具备终端运行与意图理解能力，只需使用一条通用提示词即可一键安装与接管！**
 
-```python
-import subprocess
-import json
+---
 
-def weibo_tool(action: str, **kwargs) -> str:
-    """Weibo Crawler & Data Controller Tool for AI Agents"""
-    cmd = ["python", "skills/weibo-viewer/scripts/weibo_ctl.py", action]
-    for k, v in kwargs.items():
-        if v is not None:
-            cmd.extend([f"--{k.replace('_', '-')}", str(v)])
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.stdout or result.stderr
+### 1. 通用接入提示词（复制即用）
+
+将下方提示词直接复制并发送给你正在使用的任何 AI Agent：
+
+::: tip 💡 复制提示词直接发给您的 Agent（Cursor / Claude Code / Codex / WorkBuddy 等）
+```text
+请帮我安装并掌握微博爬虫与数据查看技能 (weibo-viewer)：
+
+1. 从 GitHub 仓库获取技能资源并部署到本地：
+   - 目标仓库：https://github.com/atorber/weibo-crawler.git（分支 master）
+   - 将 skills/weibo-viewer/ 目录下载并安装到我的当前环境（项目级放入 .agents/skills/weibo-viewer/ 或全局放入 ~/.gemini/config/skills/weibo-viewer/）
+   - 为 scripts/weibo_ctl.py 赋予可执行权限 (chmod +x)
+2. 掌握核心操作能力（系统已提供双通道机制：默认优先连接本地 15001 端口服务，服务离线时自动直连本地 SQLite 数据库 weibodata.db）：
+   - 查看运行状态：python skills/weibo-viewer/scripts/weibo_ctl.py status
+   - 多维检索微博：python skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --user-id "<UID>" --limit 5
+   - 目标博主管理：python skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
+   - 启停任务调度：python skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
+   - 运行日志与Cookie：python skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
+3. 运行 `status` 子命令验证安装，完成后告诉我你已就绪，随时可以按我的指令爬取微博或检索数据！
 ```
+:::
+
+---
+
+### 2. 安装后：日常自然语言交互体验
+
+当 Agent 完成提示词加载后，你不再需要记忆任何命令行参数，直接在聊天窗口用日常大白话指挥 Agent：
+
+#### 🔍 内容检索与舆情分析
+> 👤 **你**：“帮我搜索一下本地数据库里关于‘英伟达’的最新微博，分析市场热点和情绪倾向。”  
+> 🤖 **Agent**：自动调用 `weibo_ctl.py query --keyword "英伟达" --json` 提取 12 条微博，为你生成核心要点摘要与互动排行。
+
+#### 👥 监控博主动态管理
+> 👤 **你**：“当前监控的博主列表里都有谁？帮我把迪丽热巴（UID: 1669879400）加进爬取名单中。”  
+> 🤖 **Agent**：自动执行 `weibo_ctl.py users list` 查看当前列表，并执行 `users add --uid 1669879400`，汇报更新后的博主总数。
+
+#### 🎮 自动化调度与任务编排
+> 👤 **你**：“帮我启动爬虫抓取一下最近3天的微博，抓完后告诉我总共增加了多少条数据。”  
+> 🤖 **Agent**：自动调用 `weibo_ctl.py start --since-date 2026-10-23` 拉起后台采集，并在任务完成后读取 `status` 汇总采集成果。
+
+#### 📜 故障排查与登录态维护
+> 👤 **你**：“爬虫怎么停了？帮我看看最新的日志有没有报 Cookie 过期或者被微博风控拦截。”  
+> 🤖 **Agent**：自动运行 `weibo_ctl.py logs --lines 30` 与 `cookie` 检查认证状态，给出明确的排查建议或一键从本地浏览器刷新登录态。
 
 ---
 
@@ -238,3 +267,4 @@ def weibo_tool(action: str, **kwargs) -> str:
 如需直接通过 RESTful API 进行网络交互，或进行深度 SQL 联表查询，请参阅：
 - [RESTful API 规范文档](/api/endpoints)
 - [Database Schema 与 SQL 参考文档](file:///Users/luyuchao/Documents/GitHub/weibo-crawler/skills/weibo-viewer/references/api_reference.md)
+
