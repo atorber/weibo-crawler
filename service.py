@@ -1303,7 +1303,7 @@ if __name__ == "__main__":
     import socket
 
     parser = argparse.ArgumentParser(description="Weibo Crawler Web Console")
-    parser.add_argument("--port", type=int, default=5001, help="Web Console Port (default: 5001)")
+    parser.add_argument("--port", type=int, default=15001, help="Web Console Port (default: 15001)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Web Console Host")
     args = parser.parse_args()
 

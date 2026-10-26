@@ -382,11 +382,9 @@ $RECYCLE.BIN/
 
 js.json
 user_id_list.txt
-<<<<<<< HEAD
 weibo_data/*
 weibodata.db
-=======
 weibo/weibodata.db
 weibo/*/**/*.csv
 weibo/*/*.csv
->>>>>>> origin/dev
+.agents/*

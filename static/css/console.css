@@ -174,6 +174,52 @@ body {
   justify-content: center;
 }
 
+.nav-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  padding: 14px 16px 6px;
+  user-select: none;
+}
+
+.nav-item-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.92rem;
+  transition: all 0.2s ease;
+}
+
+.nav-item-link:hover {
+  background-color: var(--bg-card-hover);
+  color: var(--text-main);
+  transform: translateX(3px);
+}
+
+.nav-ext-tag {
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.nav-item-link:hover .nav-ext-tag {
+  background: rgba(255, 59, 92, 0.15);
+  color: var(--primary);
+  border-color: rgba(255, 59, 92, 0.3);
+}
+
 .sidebar-footer {
   padding: 20px;
   border-top: 1px solid var(--border-subtle);
@@ -248,6 +294,51 @@ body {
 .header-left p {
   font-size: 0.82rem;
   color: var(--text-muted);
+}
+
+.header-right-zone {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-external-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  transition: all 0.2s ease;
+}
+
+.header-link-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-card-hover);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.header-link-icon {
+  display: flex;
+  align-items: center;
+}
+
+.header-divider-v {
+  width: 1px;
+  height: 24px;
+  background-color: var(--border-subtle);
 }
 
 .header-actions {
