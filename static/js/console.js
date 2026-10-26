@@ -239,13 +239,13 @@ function initControlButtons() {
 
 async function runCookieCheck() {
   const banner = document.getElementById('cookie-status-banner');
-  banner.innerHTML = '正在与微博移动端接口通信验证 Cookie，请稍候...';
+  banner.innerHTML = '正在与微博官方服务器通信验证 Cookie，请稍候...';
   try {
     const res = await fetch('/api/cookie/check', { method: 'POST' });
     const json = await res.json();
     if (json.valid) {
-      banner.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 600;">✅ ${json.message}</span> (当前账号: <strong>${json.user ? json.user.screen_name : ''}</strong>)`;
-      showToast(json.message, 'success');
+      banner.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 600;">✅ ${json.message}</span>`;
+      showToast('Cookie 连通性验证成功', 'success');
     } else {
       banner.innerHTML = `<span style="color: var(--accent-rose); font-weight: 600;">⚠️ ${json.message}</span>`;
       showToast(json.message, 'error');
@@ -706,7 +706,7 @@ function initConfigCenter() {
       });
       const json = await res.json();
       if (json.valid) {
-        resultDiv.innerHTML = `<span style="color: var(--accent-emerald);">✅ ${json.message} (账号: ${json.user.screen_name})</span>`;
+        resultDiv.innerHTML = `<span style="color: var(--accent-emerald);">✅ ${json.message}</span>`;
       } else {
         resultDiv.innerHTML = `<span style="color: var(--accent-rose);">❌ ${json.message}</span>`;
       }

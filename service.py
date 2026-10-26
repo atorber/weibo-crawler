@@ -698,6 +698,7 @@ def api_import_users():
 # REST API: Cookie Check Utility
 # ==========================================
 @app.route("/api/cookie/check", methods=["POST"])
+@app.route("/api/cookie/test", methods=["POST"])
 def api_check_cookie():
     req = request.get_json(silent=True) or {}
     cookie_str = req.get("cookie")
@@ -707,7 +708,7 @@ def api_check_cookie():
         _, parsed, _ = read_raw_config()
         cookie_str = parsed.get("cookie", "")
 
-    if not cookie_str or cookie_str.strip() == "your cookie":
+    if not cookie_str or cookie_str.strip() in ("your cookie", "YOUR_WEIBO_COOKIE_HERE"):
         return jsonify(
             {
                 "code": 200,
@@ -716,61 +717,111 @@ def api_check_cookie():
             }
         )
 
-    headers = {
+    # 1. 探针 1：测试微博网页端 (weibo.com PC)
+    # 大多数用户直接从 PC 浏览器控制台复制 Cookie，因此优先检测 weibo.com
+    headers_pc = {
         "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148"
-            " Safari/604.1"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ),
         "Cookie": cookie_str,
-        "Referer": "https://m.weibo.cn/",
+        "Referer": "https://weibo.com/",
+        "accept": "application/json, text/plain, */*",
     }
-
     try:
-        # Request mobile config endpoint which reflects login state
-        resp = requests.get(
-            "https://m.weibo.cn/api/config", headers=headers, timeout=8
+        r_pc = requests.get(
+            "https://weibo.com/ajax/profile/detail", headers=headers_pc, timeout=6
         )
-        if resp.status_code == 200:
-            res_json = resp.json()
-            is_login = res_json.get("data", {}).get("login", False)
-            if is_login:
-                user_info = res_json.get("data", {}).get("user", {})
+        if r_pc.status_code == 200:
+            js = r_pc.json()
+            if js.get("ok") == 1:
+                data_pc = js.get("data", {})
+                verified_url = data_pc.get("verified_url", "")
+                m = re.search(r"uid=(\d+)", verified_url)
+                uid = m.group(1) if m else ""
+                screen_name = ""
+                ip_location = data_pc.get("ip_location", "")
+                if uid:
+                    try:
+                        r_u = requests.get(
+                            f"https://weibo.com/ajax/profile/info?uid={uid}",
+                            headers=headers_pc,
+                            timeout=5,
+                        )
+                        if r_u.status_code == 200:
+                            u_info = r_u.json().get("data", {}).get("user", {})
+                            screen_name = u_info.get("screen_name", "")
+                    except Exception:
+                        pass
+                name_display = screen_name or (f"UID: {uid}" if uid else "已登录用户")
+                loc_display = f" ({ip_location})" if ip_location else ""
                 return jsonify(
                     {
                         "code": 200,
                         "valid": True,
-                        "message": "Cookie 验证通过，已成功登录！",
-                        "user": {
-                            "screen_name": user_info.get("screen_name", ""),
-                            "id": user_info.get("id", ""),
-                        },
+                        "message": f"Cookie 验证通过！登录账号：{name_display}{loc_display}",
+                        "user": {"id": uid, "screen_name": name_display},
                     }
                 )
-            else:
+    except Exception as e:
+        logger.debug(f"PC probe failed: {e}")
+
+    # 2. 探针 2：测试微博移动端 (m.weibo.cn H5)
+    headers_mobile = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        ),
+        "Cookie": cookie_str,
+        "Referer": "https://m.weibo.cn/",
+        "accept": "application/json, text/plain, */*",
+    }
+    try:
+        r_mob = requests.get(
+            "https://m.weibo.cn/api/config", headers=headers_mobile, timeout=6
+        )
+        if r_mob.status_code == 200:
+            js = r_mob.json()
+            if js.get("data", {}).get("login") is True:
+                user = js.get("data", {}).get("user", {})
+                s_name = user.get("screen_name", "已登录用户")
                 return jsonify(
                     {
                         "code": 200,
-                        "valid": False,
-                        "message": "Cookie 未包含有效登录态 (login=false)，可能已过期",
+                        "valid": True,
+                        "message": f"移动端 Cookie 验证通过！登录账号：{s_name}",
+                        "user": {"id": user.get("id", ""), "screen_name": s_name},
                     }
                 )
-        else:
+    except Exception as e:
+        logger.debug(f"Mobile probe failed: {e}")
+
+    # 3. 探针 3：测试公共只读抓取权限（针对访客 Cookie 或 SUB 凭据）
+    try:
+        r_pub = requests.get(
+            "https://weibo.com/ajax/profile/info?custom=1669879400",
+            headers=headers_pc,
+            timeout=6,
+        )
+        if r_pub.status_code == 200 and r_pub.json().get("ok") == 1:
             return jsonify(
                 {
                     "code": 200,
-                    "valid": False,
-                    "message": f"请求移动端接口返回 HTTP {resp.status_code}",
+                    "valid": True,
+                    "message": "Cookie 连通性测试通过（具备微博公共数据抓取权限，未绑定个人账号画像）",
+                    "user": {"id": "", "screen_name": "有效凭证 (公共抓取)"},
                 }
             )
     except Exception as e:
-        return jsonify(
-            {
-                "code": 200,
-                "valid": False,
-                "message": f"连接微博服务器测试超时或失败: {e}",
-            }
-        )
+        logger.debug(f"Public probe failed: {e}")
+
+    return jsonify(
+        {
+            "code": 200,
+            "valid": False,
+            "message": "Cookie 认证未通过或已过期，未能获取到有效数据权限，建议重新登录并复制最新 Cookie",
+        }
+    )
 
 
 # ==========================================
