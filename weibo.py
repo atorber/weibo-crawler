@@ -110,22 +110,22 @@ class Weibo(object):
         default_md_dir = {
             "original_image_dir": "img",
             "retweet_image_dir": "img",
-            "original_video_dir": "原创微博视频",
-            "retweet_video_dir": "转发微博视频",
-            "original_live_photo_dir": "原创微博Live Photo视频",
-            "retweet_live_photo_dir": "转发微博Live Photo视频",
+            "original_video_dir": "video",
+            "retweet_video_dir": "video",
+            "original_live_photo_dir": "live_photo",
+            "retweet_live_photo_dir": "live_photo",
         }
         md_file_dir = config.get("markdown_file_dir", {})
         self.markdown_file_dir = {**default_md_dir, **md_file_dir} if isinstance(md_file_dir, dict) else default_md_dir
 
         # 下载后本地存储的文件夹名称
         default_dl_folder = {
-            "original_image_folder": "原创微博图片",
-            "retweet_image_folder": "转发微博图片",
-            "original_video_folder": "原创微博视频",
-            "retweet_video_folder": "转发微博视频",
-            "original_live_photo_folder": "原创微博Live Photo视频",
-            "retweet_live_photo_folder": "转发微博Live Photo视频",
+            "original_image_folder": "img",
+            "retweet_image_folder": "img",
+            "original_video_folder": "video",
+            "retweet_video_folder": "video",
+            "original_live_photo_folder": "live_photo",
+            "retweet_live_photo_folder": "live_photo",
         }
         dl_folder = config.get("download_folder_name", {})
         self.download_folder_name = {**default_dl_folder, **dl_folder} if isinstance(dl_folder, dict) else default_dl_folder
@@ -3655,11 +3655,11 @@ class Weibo(object):
             # 处理转发微博
             if not self.only_crawl_original and w.get("retweet"):
                 original_img_dir = self.markdown_file_dir.get("original_image_dir", "img")
-                original_video_dir = self.markdown_file_dir.get("original_video_dir", "原创微博视频")
-                original_lp_dir = self.markdown_file_dir.get("original_live_photo_dir", "原创微博Live Photo视频")
+                original_video_dir = self.markdown_file_dir.get("original_video_dir", "video")
+                original_lp_dir = self.markdown_file_dir.get("original_live_photo_dir", "live_photo")
                 retweet_img_dir = self.markdown_file_dir.get("retweet_image_dir", "img")
-                retweet_video_dir = self.markdown_file_dir.get("retweet_video_dir", "转发微博视频")
-                retweet_lp_dir = self.markdown_file_dir.get("retweet_live_photo_dir", "转发微博Live Photo视频")
+                retweet_video_dir = self.markdown_file_dir.get("retweet_video_dir", "video")
+                retweet_lp_dir = self.markdown_file_dir.get("retweet_live_photo_dir", "live_photo")
                 # 原创部分
                 text = w.get("text", "").strip()
                 links = w.get("links") or []
@@ -3688,7 +3688,7 @@ class Weibo(object):
                     else:
                         new_md_content += f"[{label}]({original_video_dir}/{file_name})\n\n"
 
-                original_lp_dir_ref = self.markdown_file_dir.get("original_live_photo_dir", "原创微博Live Photo视频")
+                original_lp_dir_ref = self.markdown_file_dir.get("original_live_photo_dir", "live_photo")
                 live_photo_prefix = original_lp_dir_ref + "/"
                 live_photo_preview = self.markdown_preview.get("original_live_photo_preview", 0)
                 live_photo_files = self.get_download_file_names(
@@ -3738,7 +3738,7 @@ class Weibo(object):
                     else:
                         new_md_content += f"> [{label}]({retweet_video_dir}/{file_name})\n\n"
 
-                retweet_lp_dir_ref = self.markdown_file_dir.get("retweet_live_photo_dir", "转发微博Live Photo视频")
+                retweet_lp_dir_ref = self.markdown_file_dir.get("retweet_live_photo_dir", "live_photo")
                 retweet_live_photo_prefix = retweet_lp_dir_ref + "/"
                 retweet_live_photo_preview = self.markdown_preview.get("retweet_live_photo_preview", 0)
                 retweet_live_photo_files = self.get_download_file_names(
@@ -3756,8 +3756,8 @@ class Weibo(object):
             else:
                 # 原创微博
                 original_img_dir = self.markdown_file_dir.get("original_image_dir", "img")
-                original_video_dir = self.markdown_file_dir.get("original_video_dir", "原创微博视频")
-                original_lp_dir = self.markdown_file_dir.get("original_live_photo_dir", "原创微博Live Photo视频")
+                original_video_dir = self.markdown_file_dir.get("original_video_dir", "video")
+                original_lp_dir = self.markdown_file_dir.get("original_live_photo_dir", "live_photo")
                 text = w.get("text", "").strip()
                 links = w.get("links") or []
                 image_filenames = self.get_markdown_image_filenames(w, created_at)
@@ -3785,7 +3785,7 @@ class Weibo(object):
                     else:
                         new_md_content += f"[{label}]({original_video_dir}/{file_name})\n\n"
 
-                original_lp_dir_ref = self.markdown_file_dir.get("original_live_photo_dir", "原创微博Live Photo视频")
+                original_lp_dir_ref = self.markdown_file_dir.get("original_live_photo_dir", "live_photo")
                 live_photo_prefix = original_lp_dir_ref + "/"
                 live_photo_preview = self.markdown_preview.get("original_live_photo_preview", 0)
                 live_photo_files = self.get_download_file_names(
