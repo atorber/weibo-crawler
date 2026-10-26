@@ -731,7 +731,8 @@ class Weibo(object):
                     sleep(delay)
 
                 response = self.session.get(url, params=params, headers=current_headers, timeout=10)
-                response.raise_for_status()  # 如果响应状态码不是 200，会抛出 HTTPError
+                if response.status_code in (403, 414, 432) or not response.text.strip():
+                    raise ValueError(f"微博服务器拒绝未登录请求 (HTTP {response.status_code})。请在 Web 控制台「参数配置」填入有效微博 Cookie")
                 js = response.json()
 
                 # 更新统计：成功请求
@@ -757,6 +758,10 @@ class Weibo(object):
                 # 更新统计：API错误
                 self.update_crawl_stats(api_error=True)
             except ValueError as ve:
+                err_str = str(ve)
+                if "Cookie" in err_str or "432" in err_str or "403" in err_str:
+                    logger.error(f"❌ 关键认证错误: {err_str}")
+                    return {}
                 retries += 1
                 sleep_time = backoff_factor * (2 ** retries)
                 logger.error(f"JSON 解码失败，错误信息：{ve}。等待 {sleep_time} 秒后重试...")
@@ -909,8 +914,11 @@ class Weibo(object):
                     sleep(delay)
 
                 response = self.session.get(url, params=params, headers=current_headers, timeout=10)
-                response.raise_for_status()
+                if response.status_code in (403, 414, 432) or not response.text.strip():
+                    raise ValueError(f"微博服务器拒绝未登录请求 (HTTP {response.status_code})。该博主({self.user_config['user_id']})需要登录 Cookie 或请求触发了反爬限频，请在 Web 控制台「参数配置」填入有效 Cookie")
                 js = response.json()
+                if js.get("ok") == -100:
+                    raise ValueError(f"微博返回需要登录跳转 (ok: -100)。请在 Web 控制台「参数配置」->「Cookie 与安全」中填入当前登录的有效 Cookie")
 
                 # 更新统计：成功请求
                 self.update_crawl_stats(request_count=1)
@@ -991,6 +999,10 @@ class Weibo(object):
                 # 更新统计：API错误
                 self.update_crawl_stats(api_error=True)
             except ValueError as ve:
+                err_str = str(ve)
+                if "Cookie" in err_str or "432" in err_str or "403" in err_str:
+                    logger.error(f"❌ 关键认证错误: {err_str}")
+                    return 1
                 retries += 1
                 sleep_time = backoff_factor * (2 ** retries)
                 logger.error(f"JSON 解码失败，错误信息：{ve}。等待 {sleep_time} 秒后重试...")

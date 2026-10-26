@@ -981,8 +981,23 @@ services:
 1. 在`const.py`文件中，将`'NOTIFY': False`中的`False`设为`True`；
 2. 将`'PUSH_KEY': ''`的`''`替换为`'<你的push_key>'`
 
-## API服务
+## Web控制台与API服务
 
-根目录下service.py提供了一个简单的restful api示例，运行`python service.py`启动服务后可以通过http请求定时更新以及查询微博
+根目录下 `service.py` 提供了可视化的 **Web 控制台** 与 RESTful API 接口。
 
-文档参考[API说明](./API.md)
+启动命令：
+
+```bash
+python service.py
+```
+
+启动后在浏览器访问：[http://localhost:5001](http://localhost:5001)
+
+### 控制台功能
+- 🎛️ **服务调度控制**：一键启动、停止、重启爬虫进程，实时监控运行状态与任务耗时。
+- 👥 **爬取目标管理**：可视化管理目标博主队列，支持批量导入导出、单个博主单独触发采集。
+- ⚙️ **参数配置中心**：分类表单与 JSON 源码双向实时同步，集成 Cookie 连通性测试。
+- 📜 **实时日志终端**：黑客风格高亮终端，支持日志级别筛选、关键字过滤与自动滚屏。
+- 🗄️ **数据检索预览**：随时检索浏览本地 SQLite 采集入库的历史微博记录。
+
+API 详细接口规范可参考 [API 说明文档](./API.md)。

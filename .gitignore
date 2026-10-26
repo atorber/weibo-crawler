@@ -381,3 +381,5 @@ $RECYCLE.BIN/
 
 js.json
 user_id_list.txt
+weibo_data/*
+weibodata.db
