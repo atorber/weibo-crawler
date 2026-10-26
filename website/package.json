@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Official documentation for Weibo Crawler",
   "scripts": {
-    "dev": "vitepress dev",
+    "dev": "vitepress dev --port 15000",
     "build": "vitepress build",
-    "docs:dev": "vitepress dev",
+    "docs:dev": "vitepress dev --port 15000",
     "docs:build": "vitepress build",
-    "docs:preview": "vitepress preview"
+    "docs:preview": "vitepress preview --port 15000"
   },
   "devDependencies": {
     "vitepress": "^1.6.4"

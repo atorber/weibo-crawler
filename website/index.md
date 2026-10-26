@@ -21,11 +21,17 @@ hero:
     - theme: alt
       text: RESTful API
       link: /api/
+    - theme: alt
+      text: 🤖 Agent 技能
+      link: /guide/agent-skill
 
 features:
   - icon: 🖥️
     title: 现代 Web 可视化控制台
     details: 内置轻量响应式 Web 控制台，支持目标队列维护、参数可视化调控、实时图表大屏与日志流排查。
+  - icon: 🤖
+    title: AI Agent 技能 (weibo-viewer)
+    details: 内置标准化 Agent 扩展包，支持大模型智能体自主调度爬虫、按关键词多维搜索与分析微博数据。
   - icon: 🔑
     title: 浏览器 Cookie 免密读取
     details: 无需繁琐 F12 抓包，一键自动探测提取 Chrome、Edge、Firefox、Safari、Brave 本地登录态。
@@ -70,7 +76,7 @@ pip install -r requirements.txt
 
 # 3. 启动 Web 控制台
 python service.py
-# 浏览器访问 http://127.0.0.1:5001 即刻体验
+# 浏览器访问 http://127.0.0.1:15001 即刻体验
 ```
 
 ```bash [命令行直接运行]

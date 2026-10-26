@@ -23,13 +23,13 @@
 python service.py
 ```
 
-默认将在 `http://127.0.0.1:5001` 启动服务，并在浏览器中打开控制台。
+默认将在 `http://127.0.0.1:15001` 启动服务，并在浏览器中打开控制台。
 
 ::: tip 生产环境部署
 如需在生产环境部署，建议结合 Gunicorn 或 uWSGI：
 ```bash
 pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 service:app
+gunicorn -w 4 -b 0.0.0.0:15001 service:app
 ```
 :::
 

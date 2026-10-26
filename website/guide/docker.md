@@ -3,7 +3,7 @@
 本项目提供了官方 `Dockerfile` 与 `docker-compose.yml`，方便在云服务器、家庭 NAS（群晖、威联通、极空间、Unraid）等环境中以容器方式一键部署并稳定运行。
 
 系统支持**两种运行形态**：
-1. **Web 控制台服务模式**（推荐）：暴露 `5001` 端口，随时通过浏览器访问管理后台、查看大屏与实时日志。
+1. **Web 控制台服务模式**（推荐）：暴露 `15001` 端口，随时通过浏览器访问管理后台、查看大屏与实时日志。
 2. **静默定时爬取模式**：作为后台守护进程，按设定的时间间隔自动周期循环爬取。
 
 ---
@@ -23,14 +23,14 @@ docker build -t weibo-crawler .
 ```bash
 docker run -d \
   --name weibo-crawler-web \
-  -p 5001:5001 \
+  -p 15001:15001 \
   -v $(pwd)/config.json:/app/config.json \
   -v $(pwd)/weibo:/app/weibo \
   --restart unless-stopped \
   weibo-crawler python service.py
 ```
 
-容器启动后，在局域网或公网浏览器中访问 `http://<服务器IP>:5001` 即可进入现代化 Web 控制台。
+容器启动后，在局域网或公网浏览器中访问 `http://<服务器IP>:15001` 即可进入现代化 Web 控制台。
 
 ---
 
@@ -62,14 +62,14 @@ docker run -it -d \
 ```yaml
 version: '3.8'
 services:
-  # Web 控制台服务（按需映射 5001 端口）
+  # Web 控制台服务（按需映射 15001 端口）
   weibo-web:
     build:
       context: .
       dockerfile: Dockerfile
     command: python service.py
     ports:
-      - "5001:5001"
+      - "15001:15001"
     volumes:
       - ./config.json:/app/config.json
       - ./weibo:/app/weibo

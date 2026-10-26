@@ -2,7 +2,7 @@
 
 本文档详尽列出了 `service.py` 提供的标准化 RESTful API 接口端点、请求方式、入参规范与返回格式。
 
-默认服务运行在 `http://127.0.0.1:5001`（或由启动参数 `--port` 指定）。
+默认服务运行在 `http://127.0.0.1:15001`（或由启动参数 `--port` 指定）。
 
 ---
 
@@ -57,7 +57,7 @@
 #### 请求示例
 
 ```bash
-curl -X POST http://127.0.0.1:5001/api/service/start \
+curl -X POST http://127.0.0.1:15001/api/service/start \
   -H "Content-Type: application/json" \
   -d '{"user_id_list": ["1669879400"]}'
 ```
@@ -160,7 +160,7 @@ curl -X POST http://127.0.0.1:5001/api/service/start \
 - **Method**: `DELETE`
 
 ```bash
-curl -X DELETE http://127.0.0.1:5001/api/users/1669879400
+curl -X DELETE http://127.0.0.1:15001/api/users/1669879400
 ```
 
 ---

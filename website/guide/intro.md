@@ -58,6 +58,10 @@ Weibo Crawler 采用**双引擎架构**，既可以作为轻量 CLI 脚本与定
 ### 5. 多媒体高清资产完整归档
 - **原图 & 视频归档**：批量下载原创及转发微博的高清大图、高清视频和 Live Photo 动态照片。
 - **EXIF 拍摄时间写入**：自动将微博发布时间写入图片的 EXIF 原始拍摄日期中，与手机相册完美协同。
+
+### 6. AI Agent 技能集成 (weibo-viewer)
+- 内置开箱即用的智能体 Skill 包，赋能大语言模型（LLM）与 Agent 系统（Antigravity、Claude Code、Cursor 等）。
+- 具备双通道 CLI 调度工具与 REST API，支持 Agent 自动化启停任务、监控状态，以及对本地微博知识库进行高精度的关键词检索与舆情摘要。详情请参阅 [AI Agent 技能指南](/guide/agent-skill)。
 - **规范相对路径**：所有媒体资源默认按模块英文相对路径分类管理（`img/`、`video/`、`live_photo/`），防止跨平台中文乱码。
 
 ---

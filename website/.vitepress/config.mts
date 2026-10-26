@@ -5,6 +5,12 @@ export default defineConfig({
   title: 'Weibo Crawler',
   description: '高效、稳定、开箱即用的新浪微博爬虫与数据采集平台',
   base: '/weibo-crawler/',
+  vite: {
+    server: {
+      port: 15000,
+      host: '0.0.0.0'
+    }
+  },
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/weibo-crawler/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#e6162d' }]
@@ -20,6 +26,7 @@ export default defineConfig({
       {
         text: '更多',
         items: [
+          { text: '🤖 Agent 技能', link: '/guide/agent-skill' },
           { text: '获取 User ID', link: '/guide/user-id' },
           { text: 'Cookie 指南', link: '/guide/cookie' },
           { text: '自动化爬取', link: '/guide/automation' },
@@ -53,6 +60,12 @@ export default defineConfig({
             { text: '定期自动增量爬取', link: '/guide/automation' },
             { text: 'Docker 容器化部署', link: '/guide/docker' },
             { text: '二次开发与 Python 调用', link: '/guide/advanced' }
+          ]
+        },
+        {
+          text: 'AI Agent 集成',
+          items: [
+            { text: '🤖 Agent 技能 (weibo-viewer)', link: '/guide/agent-skill' }
           ]
         }
       ],
