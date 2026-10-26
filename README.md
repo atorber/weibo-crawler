@@ -4,9 +4,22 @@
 
 > 📖 **官方在线文档站点**：[https://atorber.github.io/weibo-crawler/](https://atorber.github.io/weibo-crawler/)
 
+## 💡 写在前面：这个项目能干什么？
+
+简单来说，**Weibo Crawler** 是一个致力于解决**新浪微博数据采集、持久化存储与下游消费全链路**的开箱即用开源平台：
+
+- 🎯 **精准持续采集**：指定一个或多个目标博主的 UID，自动化全量或增量爬取其历史及最新微博（包括原创/转发完整正文、高清原图、实况视频 Live Photo、高清视频、互动点赞/评论/转发量及发布工具等）；
+- 💾 **多元灵活存储**：采集数据可自由落盘为**本地文件**（CSV、JSON、Markdown），存储在**本地免配置数据库**（SQLite），或无缝同步推送到**云端/自建企业级数据库与中台**（MySQL、MongoDB、HTTP Webhook）；
+- 🚀 **开放查询与价值赋能**：内置标准化 **RESTful API** 与 **AI Agent 智能体技能**。你可以随时通过接口多维检索历史微博，为后续的**数据挖掘、统计分析、传播学/社会学学术研究、品牌舆情监控、大模型 (LLM) 知识库构建 (RAG) 与智能摘要提取**提供源源不断、清洗完毕的结构化数据底座。
+
+![Weibo Crawler 现代化 Web 控制台](website/public/images/console-dashboard.png)
+
 - [Weibo Crawler](#weibo-crawler)
+  - [写在前面：这个项目能干什么？](#-写在前面这个项目能干什么)
   - [功能](#功能)
   - [输出](#输出)
+  - [Web控制台与API服务](#web控制台与api服务)
+  - [AI Agent 技能集成 (weibo-viewer)](#ai-agent-技能集成-weibo-viewer)
   - [实例](#实例)
   - [运行环境](#运行环境)
   - [使用说明](#使用说明)
@@ -22,7 +35,6 @@
   - [添加cookie与不添加cookie的区别（可选）](#添加cookie与不添加cookie的区别可选)
   - [如何获取cookie（可选）](#如何获取cookie可选)
   - [如何检测cookie是否有效（可选）](#如何检测cookie是否有效可选)
-  - [API服务](#api服务)
 
 ## 功能
 
@@ -30,9 +42,10 @@
 
 * 写入**csv文件**（默认）
 * 写入**json文件**（可选）
-* 写入**MySQL数据库**（可选）
-* 写入**MongoDB数据库**（可选）
-* 写入**SQLite数据库**（可选）
+* 写入**MySQL数据库**（可选，带连通性测试）
+* 写入**MongoDB数据库**（可选，带连通性测试）
+* 写入**SQLite数据库**（可选，本地免配置）
+* 触发**HTTP Webhook**实时通知推送（可选）
 * 下载用户**原创**微博中的原始**图片**（可选）
 * 下载用户**转发**微博中的原始**图片**（可选）
 * 下载用户**原创**微博中的**视频**（可选）
@@ -41,6 +54,9 @@
 * 下载用户**转发**微博**Live Photo**中的**视频**（可选）
 * 下载用户**原创和转发**微博下的一级评论（可选）
 * 下载用户**原创和转发**微博下的转发（可选）
+* 🖥️ 提供**开箱即用 Web 控制台**（运行于 `15001` 端口，实时监控大屏、日志流与历史微博多维检索）
+* 🔑 **免密一键读取浏览器 Cookie**（自动探测 Chrome、Edge、Firefox、Safari、Brave）
+* 🤖 **内置 AI Agent 技能 (`weibo-viewer`)**（支持 Cursor、Claude Code、Codex、WorkBuddy 等一键提示词接入）
 
 如果你只对用户信息感兴趣，而不需要爬用户的微博，也可以通过设置实现只爬取微博用户信息的功能。程序也可以实现**爬取结果自动更新**，即：现在爬取了目标用户的微博，几天之后，目标用户可能又发新微博了。通过设置，可以实现每隔几天**增量爬取**用户这几天发的新微博。具体方法见[定期自动爬取微博](#7定期自动爬取微博可选)。
 
@@ -983,21 +999,68 @@ services:
 
 ## Web控制台与API服务
 
-根目录下 `service.py` 提供了可视化的 **Web 控制台** 与 RESTful API 接口。
+本项目不仅提供命令行脚本，还内置了一套高颜值、开箱即用的现代化 **Web 监控与管理控制台** 与标准化 RESTful API 接口服务（由 `service.py` 驱动）。
 
-启动命令：
+### 启动 Web 控制台
 
 ```bash
+# 默认在 15001 端口启动，监听 0.0.0.0
 python service.py
+
+# 自定义端口与主机
+python service.py --port 15001 --host 0.0.0.0
 ```
 
-启动后在浏览器访问：[http://localhost:15001](http://localhost:15001)
+启动后在浏览器访问：👉 **[http://localhost:15001](http://localhost:15001)**
 
-### 控制台功能
-- 🎛️ **服务调度控制**：一键启动、停止、重启爬虫进程，实时监控运行状态与任务耗时。
-- 👥 **爬取目标管理**：可视化管理目标博主队列，支持批量导入导出、单个博主单独触发采集。
-- ⚙️ **参数配置中心**：分类表单与 JSON 源码双向实时同步，集成 Cookie 连通性测试。
-- 📜 **实时日志终端**：黑客风格高亮终端，支持日志级别筛选、关键字过滤与自动滚屏。
-- 🗄️ **数据检索预览**：随时检索浏览本地 SQLite 采集入库的历史微博记录。
+### 控制台核心功能矩阵
 
-API 详细接口规范可参考 [API 说明文档](./API.md)。
+1. 📊 **全局总览控制**：
+   - 实时监控爬虫运行状态（空闲/运行中）、当前抓取博主、进程 PID 与累计运行时长；
+   - 顶部快捷启停与安全终止按钮，已抓取数据自动安全持久化。
+2. 🔑 **浏览器免密读取 Cookie**：
+   - 无需手动打开 F12 抓包复制复杂字符串，一键自动扫描并提取 Chrome、Edge、Firefox、Safari、Brave 本地登录态，在线鉴权验证并回写配置文件。
+3. 👥 **目标博主队列管理**：
+   - 可视化维护待爬博主列表，支持独立配置博主抓取起始日期与正文过滤词；
+   - 支持多账号一键全量采集或单个博主单独触发增量同步。
+4. ⚙️ **参数配置与连通性测试**：
+   - 参数分类可视化调节（爬虫策略、图片视频下载、高级限频防封）；
+   - 内置 **MySQL**、**MongoDB**、**HTTP Webhook** 连通性在线即时测试，故障前置排查。
+5. 🗄️ **多维微博数据检索与预览**：
+   - 告别黑盒数据库，按博主筛选、发布起止日期区间、正文关键字模糊检索已入库微博，支持直接点击外链跳转原博。
+6. 🔌 **内置 RESTful API 接口中心**：
+   - 控制台内嵌 18+ 个标准化 API 接口速查卡片与一键 cURL 调用示例，详细接口文档见 [API 说明文档](./API.md)。
+
+---
+
+## AI Agent 技能集成 (weibo-viewer)
+
+本项目已将控制台支持的全部操作封装为开箱即用的 **Agent Skill** 扩展包（`skills/weibo-viewer`），赋能各类大模型与智能体助手（**Google Antigravity、Cursor、Claude Code、OpenAI Codex、WorkBuddy、扣子 Coze、Dify** 等）。
+
+### ⚡ 通用一键安装提示词
+
+**无需针对不同平台编写复杂的配置文件**，只需将以下提示词**复制并发送给任何支持代码执行或终端操作的 AI Agent**，即可秒级完成安装与接管：
+
+```text
+请帮我从 GitHub 安装并掌握微博爬虫技能 (weibo-viewer)：
+
+1. 目标仓库：https://github.com/atorber/weibo-crawler.git（分支 master）
+2. 将其中的 skills/weibo-viewer/ 目录下载并安装到我的当前环境（项目级安装到 .agents/skills/weibo-viewer/ 或全局安装到 ~/.gemini/config/skills/weibo-viewer/）；
+3. 确保包含 SKILL.md、scripts/weibo_ctl.py 及 references/api_reference.md，并为 scripts/weibo_ctl.py 赋予可执行权限 (chmod +x)；
+4. 掌握核心操作命令（默认服务端口 15001，服务离线时自动直连本地 SQLite weibodata.db）：
+   - 查询状态：python skills/weibo-viewer/scripts/weibo_ctl.py status
+   - 多维检索：python skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --limit 5
+   - 博主管理：python skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
+   - 爬取调度：python skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
+   - 日志与凭据：python skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
+5. 运行 status 子命令验证安装，完成后告诉我你已就绪！
+```
+
+### 💬 自然语言交互示例
+
+安装后，你可以像日常聊天一样指挥 Agent：
+- *“帮我查一下本地数据库里关于‘英伟达’的最新微博，分析热点与情绪倾向。”*
+- *“监控博主列表里都有谁？把迪丽热巴（UID: 1669879400）加进爬取名单。”*
+- *“启动爬虫抓取一下最近3天的微博，完成后汇报总共存了多少条。”*
+
+📖 更多智能体详细配置与范例，请参阅官方文档：[AI Agent 技能集成指南](https://atorber.github.io/weibo-crawler/guide/agent-skill)。
