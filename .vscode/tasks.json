@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "启动 Python 脚本",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "your_script.py"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "custom",
+                "pattern": [],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "",
+                    "endsPattern": ""
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "启动 Node.js 应用",
+            "type": "shell",
+            "command": "node",
+            "args": [
+                "app.js"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "custom",
+                "pattern": [],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "",
+                    "endsPattern": ""
+                }
+            },
+            "group": "build"
+        }
+    ]
+}

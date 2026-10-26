@@ -2,6 +2,7 @@
 log/
 weibo/
 config.json
+.env
 node_modules/
 website/node_modules/
 website/.vitepress/dist/
@@ -381,5 +382,11 @@ $RECYCLE.BIN/
 
 js.json
 user_id_list.txt
+<<<<<<< HEAD
 weibo_data/*
 weibodata.db
+=======
+weibo/weibodata.db
+weibo/*/**/*.csv
+weibo/*/*.csv
+>>>>>>> origin/dev

@@ -1,0 +1,3 @@
+[flake8]
+max-line-length = 120  # 设置更大的行宽限制
+exclude = .venv,__pycache__,migrations 
