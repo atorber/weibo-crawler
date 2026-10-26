@@ -976,16 +976,60 @@ input:checked + .slider:before {
   margin-top: 20px;
   padding: 22px;
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-subtle);
   transition: all 0.25s ease;
-  display: none;
+  display: block !important; /* 始终展示，不勾选输出格式也可以预先配置信息 */
 }
 
-.config-sub-card.active {
-  display: block;
-  animation: fadeIn 0.25s ease-out;
+.config-sub-card.is-enabled {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.035);
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.06);
 }
+
+.config-sub-card.is-disabled {
+  border-color: var(--border-subtle);
+  opacity: 0.88;
+}
+
+.config-sub-card.is-disabled:hover {
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.badge-tag-enabled {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #10b981 !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  font-weight: 600;
+}
+
+.badge-tag-disabled {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--border-subtle) !important;
+}
+
+@keyframes errorPulse {
+  0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); border-color: var(--accent-rose); }
+  50% { box-shadow: 0 0 0 5px rgba(244, 63, 94, 0.25); border-color: var(--accent-rose); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+}
+
+.input-error-pulse {
+  animation: errorPulse 1s ease-out;
+  border-color: var(--accent-rose) !important;
+}
+
+.browser-import-banner {
+  background: rgba(59, 130, 246, 0.07);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
 
 .config-sub-card-header {
   display: flex;
@@ -1065,3 +1109,323 @@ input:checked + .slider:before {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
+
+/* Data Explorer Multi-dimensional Filter Bar */
+.data-filter-bar {
+  padding: 18px 24px 14px 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.015);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.data-filter-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.data-filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.data-filter-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+.date-range-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-range-group .form-control {
+  min-width: 140px;
+}
+
+.date-range-separator {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.data-filter-keyword-item {
+  flex: 1;
+  min-width: 220px;
+}
+
+.data-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 1px;
+}
+
+.data-filter-meta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-top: 4px;
+}
+
+/* Calendar icon styling for dark & light mode */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
+/* Control Actions Help Bar */
+.control-actions-help {
+  margin-top: 14px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.help-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.help-item code {
+  font-size: 0.76rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+}
+
+.help-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.help-badge.badge-primary {
+  background: rgba(230, 22, 45, 0.15);
+  color: #ff4d4f;
+  border: 1px solid rgba(230, 22, 45, 0.3);
+}
+
+.help-badge.badge-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.help-badge.badge-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+/* ==========================================
+   RESTful API Docs Center Styles
+   ========================================== */
+.api-docs-header {
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.api-base-url-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+}
+
+.url-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.api-base-url-pill code {
+  color: var(--accent-emerald);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.api-filter-toolbar {
+  padding: 16px 28px;
+  background: rgba(255, 255, 255, 0.015);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.api-category-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.api-cat-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.api-cat-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.api-cat-btn.active {
+  background: rgba(230, 22, 45, 0.12);
+  color: #ff4d4f;
+  border-color: rgba(230, 22, 45, 0.4);
+  font-weight: 600;
+}
+
+.api-search-box {
+  min-width: 260px;
+}
+
+.api-endpoints-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 30px;
+}
+
+.api-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+
+.api-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.api-card-header {
+  padding: 16px 22px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.api-method-path {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.method-badge {
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.method-badge.method-get {
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.method-badge.method-post {
+  background: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.method-badge.method-delete {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.api-path {
+  font-family: 'JetBrains Mono', Consolas, Menlo, monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.api-summary {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.api-card-body {
+  padding: 16px 22px;
+}
+
+.api-block-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.api-code-block {
+  margin: 0;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: #e2e8f0;
+  overflow-x: auto;
+}
+
+
+

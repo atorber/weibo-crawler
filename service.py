@@ -372,8 +372,15 @@ def save_user_targets(users):
 
 
 # SQLite Data query helper
-def get_sqlite_stats_and_data(page=1, page_size=15, user_id=None, keyword=None):
-    """Queries weibo data from sqlite database if present."""
+def get_sqlite_stats_and_data(
+    page=1,
+    page_size=15,
+    user_id=None,
+    keyword=None,
+    start_date=None,
+    end_date=None,
+):
+    """Queries weibo data from sqlite database if present with user, date range, and keyword filters."""
     _, parsed, _ = read_raw_config()
     db_path = parsed.get("sqlite_db_path", os.path.join(BASE_DIR, "weibodata.db"))
     if not os.path.isabs(db_path):
@@ -385,7 +392,7 @@ def get_sqlite_stats_and_data(page=1, page_size=15, user_id=None, keyword=None):
         if os.path.isfile(alt_path):
             db_path = alt_path
         else:
-            return {"exists": False, "total": 0, "items": []}
+            return {"exists": False, "total": 0, "items": [], "available_users": []}
 
     try:
         conn = sqlite3.connect(db_path)
@@ -398,17 +405,47 @@ def get_sqlite_stats_and_data(page=1, page_size=15, user_id=None, keyword=None):
         )
         if not cursor.fetchone():
             conn.close()
-            return {"exists": True, "total": 0, "items": []}
+            return {"exists": True, "total": 0, "items": [], "available_users": []}
+
+        # Retrieve available users for filter dropdown
+        available_users = []
+        try:
+            cursor.execute(
+                "SELECT DISTINCT user_id, screen_name FROM weibo WHERE user_id IS NOT NULL AND user_id != '' ORDER BY screen_name"
+            )
+            available_users = [
+                {"user_id": str(r["user_id"]), "screen_name": str(r["screen_name"] or r["user_id"])}
+                for r in cursor.fetchall()
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to fetch available users from weibo table: {e}")
 
         # Build query
         where_clauses = []
         params = []
         if user_id:
             where_clauses.append("user_id = ?")
-            params.append(user_id)
+            params.append(str(user_id).strip())
+
         if keyword:
-            where_clauses.append("text LIKE ?")
-            params.append(f"%{keyword}%")
+            kw_clean = str(keyword).strip()
+            where_clauses.append("(text LIKE ? OR screen_name LIKE ?)")
+            params.append(f"%{kw_clean}%")
+            params.append(f"%{kw_clean}%")
+
+        if start_date:
+            sd_clean = str(start_date).strip()
+            if len(sd_clean) == 10:
+                sd_clean += " 00:00:00"
+            where_clauses.append("created_at >= ?")
+            params.append(sd_clean)
+
+        if end_date:
+            ed_clean = str(end_date).strip()
+            if len(ed_clean) == 10:
+                ed_clean += " 23:59:59"
+            where_clauses.append("created_at <= ?")
+            params.append(ed_clean)
 
         where_sql = (
             f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
@@ -432,10 +469,11 @@ def get_sqlite_stats_and_data(page=1, page_size=15, user_id=None, keyword=None):
             "page": page,
             "page_size": page_size,
             "items": rows,
+            "available_users": available_users,
         }
     except Exception as e:
         logger.error(f"查询 SQLite 数据库出错: {e}")
-        return {"exists": True, "total": 0, "error": str(e), "items": []}
+        return {"exists": True, "total": 0, "error": str(e), "items": [], "available_users": []}
 
 
 # Initialize Flask App
@@ -447,13 +485,29 @@ app = Flask(
 app.config["JSON_AS_ASCII"] = False
 app.config["JSONIFY_MIMETYPE"] = "application/json;charset=utf-8"
 
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 
 # ==========================================
-# Web Console HTML Routes
+# Web Console HTML Routes (Independent Routes for Sidebar Menus)
 # ==========================================
 @app.route("/")
 @app.route("/console")
-def console_home():
+@app.route("/dashboard")
+@app.route("/targets")
+@app.route("/settings")
+@app.route("/output")
+@app.route("/logs")
+@app.route("/data")
+@app.route("/api-docs")
+@app.route("/docs")
+@app.route("/console/<path:subpath>")
+def console_home(subpath=None):
     return render_template("index.html")
 
 
@@ -697,28 +751,15 @@ def api_import_users():
 # ==========================================
 # REST API: Cookie Check Utility
 # ==========================================
-@app.route("/api/cookie/check", methods=["POST"])
-@app.route("/api/cookie/test", methods=["POST"])
-def api_check_cookie():
-    req = request.get_json(silent=True) or {}
-    cookie_str = req.get("cookie")
-
-    if not cookie_str:
-        # Load from config
-        _, parsed, _ = read_raw_config()
-        cookie_str = parsed.get("cookie", "")
-
+def verify_cookie_string(cookie_str):
     if not cookie_str or cookie_str.strip() in ("your cookie", "YOUR_WEIBO_COOKIE_HERE"):
-        return jsonify(
-            {
-                "code": 200,
-                "valid": False,
-                "message": "当前未配置 Cookie（处于免登录匿名模式）",
-            }
-        )
+        return {
+            "valid": False,
+            "message": "当前未配置 Cookie（处于免登录匿名模式）",
+            "user": {}
+        }
 
     # 1. 探针 1：测试微博网页端 (weibo.com PC)
-    # 大多数用户直接从 PC 浏览器控制台复制 Cookie，因此优先检测 weibo.com
     headers_pc = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -755,14 +796,11 @@ def api_check_cookie():
                         pass
                 name_display = screen_name or (f"UID: {uid}" if uid else "已登录用户")
                 loc_display = f" ({ip_location})" if ip_location else ""
-                return jsonify(
-                    {
-                        "code": 200,
-                        "valid": True,
-                        "message": f"Cookie 验证通过！登录账号：{name_display}{loc_display}",
-                        "user": {"id": uid, "screen_name": name_display},
-                    }
-                )
+                return {
+                    "valid": True,
+                    "message": f"Cookie 验证通过！登录账号：{name_display}{loc_display}",
+                    "user": {"id": uid, "screen_name": name_display},
+                }
     except Exception as e:
         logger.debug(f"PC probe failed: {e}")
 
@@ -785,14 +823,11 @@ def api_check_cookie():
             if js.get("data", {}).get("login") is True:
                 user = js.get("data", {}).get("user", {})
                 s_name = user.get("screen_name", "已登录用户")
-                return jsonify(
-                    {
-                        "code": 200,
-                        "valid": True,
-                        "message": f"移动端 Cookie 验证通过！登录账号：{s_name}",
-                        "user": {"id": user.get("id", ""), "screen_name": s_name},
-                    }
-                )
+                return {
+                    "valid": True,
+                    "message": f"移动端 Cookie 验证通过！登录账号：{s_name}",
+                    "user": {"id": user.get("id", ""), "screen_name": s_name},
+                }
     except Exception as e:
         logger.debug(f"Mobile probe failed: {e}")
 
@@ -804,24 +839,212 @@ def api_check_cookie():
             timeout=6,
         )
         if r_pub.status_code == 200 and r_pub.json().get("ok") == 1:
-            return jsonify(
-                {
-                    "code": 200,
-                    "valid": True,
-                    "message": "Cookie 连通性测试通过（具备微博公共数据抓取权限，未绑定个人账号画像）",
-                    "user": {"id": "", "screen_name": "有效凭证 (公共抓取)"},
-                }
-            )
+            return {
+                "valid": True,
+                "message": "Cookie 连通性测试通过（具备微博公共数据抓取权限，未绑定个人账号画像）",
+                "user": {"id": "", "screen_name": "有效凭证 (公共抓取)"},
+            }
     except Exception as e:
         logger.debug(f"Public probe failed: {e}")
 
-    return jsonify(
-        {
-            "code": 200,
-            "valid": False,
-            "message": "Cookie 认证未通过或已过期，未能获取到有效数据权限，建议重新登录并复制最新 Cookie",
-        }
-    )
+    return {
+        "valid": False,
+        "message": "Cookie 认证未通过或已过期，未能获取到有效数据权限，建议重新登录并更新 Cookie",
+        "user": {}
+    }
+
+
+def extract_browser_cookies(browser_name="auto"):
+    """
+    通过 rookiepy 从本地浏览器自动提取微博 Cookie
+    """
+    try:
+        import rookiepy
+    except ImportError:
+        return None, "未安装 rookiepy 库，请先在终端运行 pip install rookiepy", None
+
+    browser_map = {
+        "chrome": ("Google Chrome", getattr(rookiepy, "chrome", None)),
+        "edge": ("Microsoft Edge", getattr(rookiepy, "edge", None)),
+        "firefox": ("Mozilla Firefox", getattr(rookiepy, "firefox", None)),
+        "safari": ("Apple Safari", getattr(rookiepy, "safari", None)),
+        "brave": ("Brave", getattr(rookiepy, "brave", None)),
+        "arc": ("Arc", getattr(rookiepy, "arc", None)),
+        "opera": ("Opera", getattr(rookiepy, "opera", None)),
+        "chromium": ("Chromium", getattr(rookiepy, "chromium", None)),
+        "vivaldi": ("Vivaldi", getattr(rookiepy, "vivaldi", None)),
+    }
+
+    domains = ["weibo.com", "weibo.cn"]
+
+    def try_extract_from(b_key):
+        b_info = browser_map.get(b_key)
+        if not b_info or not b_info[1]:
+            return None, f"当前环境暂不支持或未找到 {b_key} 提取接口"
+        b_name, fn = b_info
+        try:
+            raw_cookies = fn(domains)
+            if not raw_cookies:
+                return None, f"{b_name} 中未找到微博登录 Cookie"
+
+            def priority(c):
+                dom = c.get("domain", "")
+                if "visitor" in dom:
+                    return 0
+                if dom.endswith("weibo.com"):
+                    return 1
+                if dom.endswith("weibo.cn"):
+                    return 2
+                return 0
+
+            sorted_cookies = sorted(raw_cookies, key=priority)
+            cookie_dict = {}
+            has_sub = False
+            for c in sorted_cookies:
+                name = c.get("name")
+                val = c.get("value")
+                if name and val is not None:
+                    cookie_dict[name] = val
+                    if name == "SUB":
+                        has_sub = True
+
+            cookie_str = "; ".join([f"{k}={v}" for k, v in cookie_dict.items()])
+            return {
+                "cookie_str": cookie_str,
+                "browser_key": b_key,
+                "browser_name": b_name,
+                "count": len(cookie_dict),
+                "has_sub": has_sub
+            }, None
+        except Exception as e:
+            err_msg = str(e)
+            if "Operation not permitted" in err_msg or "Full Disk Access" in err_msg:
+                return None, f"{b_name} 读取受限（macOS 安全策略需要授予终端完全磁盘访问权限）"
+            if "Can't find cookies file" in err_msg or "can't find" in err_msg.lower():
+                return None, f"{b_name} 未找到 Cookie 数据文件（未安装或未产生数据）"
+            return None, f"{b_name} 读取异常: {err_msg}"
+
+    if browser_name and browser_name != "auto":
+        res, err = try_extract_from(browser_name)
+        if err:
+            return None, err, browser_name
+        return res["cookie_str"], None, res["browser_name"]
+
+    # 自动探测模式
+    candidates = ["chrome", "edge", "firefox", "brave", "arc", "safari", "opera", "chromium"]
+    results = []
+    errors = []
+    for b in candidates:
+        res, err = try_extract_from(b)
+        if res:
+            if res["has_sub"]:
+                return res["cookie_str"], None, res["browser_name"]
+            results.append(res)
+        elif err and "未安装" not in err and "未找到" not in err:
+            errors.append(err)
+
+    if results:
+        best = max(results, key=lambda x: x["count"])
+        return best["cookie_str"], None, best["browser_name"]
+
+    msg = "未能自动从本地浏览器中提取到微博 Cookie。"
+    if errors:
+        msg += " 失败提示: " + "；".join(errors[:2])
+    else:
+        msg += " 请确保已在 Chrome / Edge / Firefox 等浏览器登录过 weibo.com。"
+    return None, msg, None
+
+
+@app.route("/api/cookie/check", methods=["POST"])
+@app.route("/api/cookie/test", methods=["POST"])
+def api_check_cookie():
+    req = request.get_json(silent=True) or {}
+    cookie_str = req.get("cookie")
+
+    if not cookie_str:
+        # Load from config
+        _, parsed, _ = read_raw_config()
+        cookie_str = parsed.get("cookie", "")
+
+    result = verify_cookie_string(cookie_str)
+    return jsonify({
+        "code": 200,
+        "valid": result.get("valid", False),
+        "message": result.get("message", ""),
+        "user": result.get("user", {})
+    })
+
+
+@app.route("/api/cookie/browsers", methods=["GET"])
+def api_cookie_browsers():
+    try:
+        import rookiepy
+        available = True
+    except ImportError:
+        available = False
+
+    browsers = [
+        {"id": "auto", "name": "自动探测已登录浏览器 (推荐)"},
+        {"id": "chrome", "name": "Google Chrome"},
+        {"id": "edge", "name": "Microsoft Edge"},
+        {"id": "firefox", "name": "Mozilla Firefox"},
+        {"id": "safari", "name": "Apple Safari"},
+        {"id": "brave", "name": "Brave Browser"},
+        {"id": "arc", "name": "Arc Browser"},
+        {"id": "opera", "name": "Opera Browser"},
+    ]
+    return jsonify({
+        "code": 200,
+        "rookiepy_available": available,
+        "browsers": browsers
+    })
+
+
+@app.route("/api/cookie/import_browser", methods=["POST"])
+def api_cookie_import_browser():
+    # 安全保护：只允许本地请求读取本地浏览器 Cookie
+    client_ip = request.remote_addr or ""
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        return jsonify({
+            "code": 403,
+            "success": False,
+            "message": "为了安全起见，从本地浏览器提取 Cookie 仅允许本地访问 (localhost) 调用"
+        }), 403
+
+    req = request.get_json(silent=True) or {}
+    browser = req.get("browser", "auto")
+    auto_save = req.get("save", False)
+
+    cookie_str, err_msg, detected_browser = extract_browser_cookies(browser)
+    if err_msg or not cookie_str:
+        return jsonify({
+            "code": 400,
+            "success": False,
+            "message": err_msg or "未能从浏览器提取到有效微博 Cookie"
+        })
+
+    # 校验提取出的 Cookie
+    check_result = verify_cookie_string(cookie_str)
+
+    if auto_save:
+        try:
+            _, parsed, _ = read_raw_config()
+            parsed["cookie"] = cookie_str
+            new_raw = json.dumps(parsed, indent=4, ensure_ascii=False)
+            save_config_content(new_raw)
+        except Exception as e:
+            logger.error(f"Auto-saving cookie to config failed: {e}")
+
+    return jsonify({
+        "code": 200,
+        "success": True,
+        "browser": detected_browser or browser,
+        "cookie": cookie_str,
+        "valid": check_result.get("valid", False),
+        "user": check_result.get("user", {}),
+        "message": f"成功从 {detected_browser or browser} 提取微博 Cookie！" + (" " + check_result.get("message", "") if check_result.get("valid") else "")
+    })
+
 
 
 # ==========================================
@@ -832,10 +1055,36 @@ def api_data_weibos():
     page = int(request.args.get("page", 1))
     page_size = int(request.args.get("page_size", 10))
     user_id = request.args.get("user_id", None)
+    if user_id:
+        user_id = user_id.strip()
+        if not user_id or user_id.lower() == "all":
+            user_id = None
+
     keyword = request.args.get("keyword", None)
+    if keyword:
+        keyword = keyword.strip()
+        if not keyword:
+            keyword = None
+
+    start_date = request.args.get("start_date", None)
+    if start_date:
+        start_date = start_date.strip()
+        if not start_date:
+            start_date = None
+
+    end_date = request.args.get("end_date", None)
+    if end_date:
+        end_date = end_date.strip()
+        if not end_date:
+            end_date = None
 
     res = get_sqlite_stats_and_data(
-        page=page, page_size=page_size, user_id=user_id, keyword=keyword
+        page=page,
+        page_size=page_size,
+        user_id=user_id,
+        keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
     )
     return jsonify({"code": 200, "data": res})
 
@@ -895,6 +1144,158 @@ def legacy_weibo_detail(weibo_id):
         if str(w.get("id")) == str(weibo_id):
             return jsonify(w), 200
     return jsonify({"error": "Weibo not found"}), 404
+
+
+# -------------------------------------------------------------
+# Connectivity Test Endpoints (MySQL, MongoDB, Webhook)
+# -------------------------------------------------------------
+@app.route("/api/test/mysql", methods=["POST"])
+def api_test_mysql():
+    req = request.get_json(silent=True) or {}
+    host = str(req.get("host", "localhost")).strip()
+    port = int(req.get("port", 3306))
+    user = str(req.get("user", "root")).strip()
+    password = str(req.get("password", "")).strip()
+    charset = str(req.get("charset", "utf8mb4")).strip() or "utf8mb4"
+
+    if not host or not user:
+        return jsonify({"code": 400, "valid": False, "message": "主机地址和用户名不能为空"}), 200
+
+    try:
+        import pymysql
+    except ImportError:
+        return jsonify({"code": 500, "valid": False, "message": "服务器环境缺少 PyMySQL 依赖，请先安装"}), 200
+
+    import time
+    start_time = time.time()
+    try:
+        conn = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            charset=charset,
+            connect_timeout=5,
+            read_timeout=5,
+            write_timeout=5
+        )
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT VERSION()")
+            ver = cursor.fetchone()
+            version_str = ver[0] if ver else "未知"
+        conn.close()
+        latency = int((time.time() - start_time) * 1000)
+        return jsonify({
+            "code": 200,
+            "valid": True,
+            "message": f"连接成功！MySQL 版本: {version_str} (耗时 {latency}ms)"
+        })
+    except Exception as e:
+        latency = int((time.time() - start_time) * 1000)
+        return jsonify({
+            "code": 200,
+            "valid": False,
+            "message": f"连接失败 ({latency}ms): {str(e)}"
+        })
+
+
+@app.route("/api/test/mongodb", methods=["POST"])
+def api_test_mongodb():
+    req = request.get_json(silent=True) or {}
+    uri = str(req.get("uri", "")).strip()
+
+    if not uri:
+        return jsonify({"code": 400, "valid": False, "message": "MongoDB 连接 URI 不能为空"}), 200
+
+    try:
+        import pymongo
+    except ImportError:
+        return jsonify({"code": 500, "valid": False, "message": "服务器环境缺少 pymongo 依赖，请先安装"}), 200
+
+    import time
+    start_time = time.time()
+    try:
+        client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=4000, connectTimeoutMS=4000)
+        client.admin.command('ping')
+        info = client.server_info()
+        version_str = info.get("version", "未知")
+        client.close()
+        latency = int((time.time() - start_time) * 1000)
+        return jsonify({
+            "code": 200,
+            "valid": True,
+            "message": f"连接成功！MongoDB 版本: {version_str} (耗时 {latency}ms)"
+        })
+    except Exception as e:
+        latency = int((time.time() - start_time) * 1000)
+        return jsonify({
+            "code": 200,
+            "valid": False,
+            "message": f"连接失败 ({latency}ms): {str(e)}"
+        })
+
+
+@app.route("/api/test/webhook", methods=["POST"])
+def api_test_webhook():
+    req = request.get_json(silent=True) or {}
+    url = str(req.get("url", "")).strip()
+    token = str(req.get("token", "")).strip()
+
+    if not url:
+        return jsonify({"code": 400, "valid": False, "message": "Webhook URL 不能为空"}), 200
+
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return jsonify({"code": 400, "valid": False, "message": "Webhook URL 必须以 http:// 或 https:// 开头"}), 200
+
+    import time
+    import requests
+    start_time = time.time()
+    try:
+        headers = {
+            "User-Agent": "weibo-crawler-webhook-test/1.0",
+            "Content-Type": "application/json"
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}" if not token.lower().startswith("bearer ") else token
+
+        test_payload = {
+            "event": "ping",
+            "message": "Weibo Crawler Webhook connectivity test",
+            "timestamp": int(start_time)
+        }
+        resp = requests.post(url, json=test_payload, headers=headers, timeout=6)
+        latency = int((time.time() - start_time) * 1000)
+        status_code = resp.status_code
+        reason = resp.reason or ""
+
+        if 200 <= status_code < 300:
+            return jsonify({
+                "code": 200,
+                "valid": True,
+                "message": f"响应成功！HTTP 状态码: {status_code} {reason} (耗时 {latency}ms)"
+            })
+        else:
+            return jsonify({
+                "code": 200,
+                "valid": False,
+                "message": f"收到非成功响应：HTTP 状态码 {status_code} {reason} (耗时 {latency}ms)"
+            })
+    except requests.exceptions.Timeout:
+        return jsonify({
+            "code": 200,
+            "valid": False,
+            "message": "请求超时（超过 6 秒未收到响应），请检查接口服务与网络"
+        })
+    except Exception as e:
+        latency = int((time.time() - start_time) * 1000)
+        return jsonify({
+            "code": 200,
+            "valid": False,
+            "message": f"请求异常 ({latency}ms): {str(e)}"
+        })
+
+
+
 
 
 if __name__ == "__main__":

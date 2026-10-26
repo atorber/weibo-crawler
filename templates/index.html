@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="dark">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Weibo Crawler 控制台 - 微博数据采集管理系统</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
-  <link rel="stylesheet" href="/static/css/console.css">
+  <link rel="stylesheet" href="/static/css/console.css?v=3">
 </head>
+
 <body>
   <div class="app-container">
     <!-- Left Sidebar -->
@@ -30,6 +32,10 @@
           <div class="nav-icon">⚙️</div>
           <span>参数配置</span>
         </li>
+        <li class="nav-item" data-tab="output">
+          <div class="nav-icon">📤</div>
+          <span>数据存储</span>
+        </li>
         <li class="nav-item" data-tab="logs">
           <div class="nav-icon">📜</div>
           <span>实时日志</span>
@@ -37,6 +43,10 @@
         <li class="nav-item" data-tab="data">
           <div class="nav-icon">🗄️</div>
           <span>数据预览</span>
+        </li>
+        <li class="nav-item" data-tab="api">
+          <div class="nav-icon">🔌</div>
+          <span>API 文档</span>
         </li>
       </ul>
 
@@ -58,14 +68,14 @@
           <p id="page-subtitle">监控爬虫实时运行状态与全局任务调度</p>
         </div>
         <div class="header-actions">
-          <button class="btn btn-primary" id="btn-quick-start">
+          <button class="btn btn-primary" id="btn-quick-start" title="【全局快捷】在后台启动微博数据采集进程 (weibo.py)，读取最新目标与配置开始抓取">
             <span>▶</span> 启动爬虫
           </button>
-          <button class="btn btn-danger" id="btn-quick-stop">
+          <button class="btn btn-danger" id="btn-quick-stop" title="【全局快捷】优雅终止后台正在运行的爬虫进程，已抓取数据自动持久化，不影响 Web 控制台">
             <span>⏹</span> 停止爬虫
           </button>
-          <button class="btn btn-secondary" id="btn-quick-restart" title="重启爬虫进程">
-            <span>🔄</span> 重启
+          <button class="btn btn-secondary" id="btn-quick-restart" title="【全局快捷】终止当前抓取并重新拉起爬虫进程，使最新修改的配置立即生效">
+            <span>🔄</span> 重启爬虫
           </button>
         </div>
       </header>
@@ -114,11 +124,16 @@
         <!-- Service Control Center Card -->
         <div class="dashboard-control-card">
           <div class="card-title-bar">
-            <h2 class="card-title">爬虫进程核心控制台</h2>
+            <div>
+              <h2 class="card-title">爬虫进程核心控制台</h2>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">
+                管理后台独立运行的微博数据采集子进程 (weibo.py)，不影响本控制台自身运行
+              </p>
+            </div>
             <div class="control-btn-group">
-              <button class="btn btn-primary" id="btn-main-start">▶ 启动任务</button>
-              <button class="btn btn-danger" id="btn-main-stop">⏹ 终止运行</button>
-              <button class="btn btn-secondary" id="btn-main-restart">🔄 重启服务</button>
+              <button class="btn btn-primary" id="btn-main-start" title="【启动任务】启动爬虫核心引擎，按当前配置与博主队列依次开始抓取">▶ 启动任务</button>
+              <button class="btn btn-danger" id="btn-main-stop" title="【终止运行】向爬虫进程发送优雅停止信号（SIGTERM），保存已抓取数据并安全退出">⏹ 终止运行</button>
+              <button class="btn btn-secondary" id="btn-main-restart" title="【重启进程】停止当前正在抓取的爬虫子进程，稍候 0.5 秒重新以最新配置拉起进程（非重启当前 Web 控制台）">🔄 重启进程</button>
             </div>
           </div>
 
@@ -142,6 +157,21 @@
               </div>
             </div>
           </div>
+
+          <div class="control-actions-help">
+            <div class="help-item">
+              <span class="help-badge badge-primary">▶ 启动</span>
+              <span>拉起后台 <code>weibo.py</code> 采集进程开始作业</span>
+            </div>
+            <div class="help-item">
+              <span class="help-badge badge-danger">⏹ 停止</span>
+              <span>向爬虫发送 SIGTERM 终止信号，已抓取数据安全落盘，不影响 Web 面板</span>
+            </div>
+            <div class="help-item">
+              <span class="help-badge badge-secondary">🔄 重启</span>
+              <span>终止当前爬虫并以最新配置重新拉起进程（非重启本 Web 控制台服务）</span>
+            </div>
+          </div>
         </div>
 
         <!-- Cookie Quick Health Check -->
@@ -153,7 +183,8 @@
                 探针检测微博 Cookie 是否有效及登录账号画像
               </p>
             </div>
-            <div style="display: flex; gap: 10px;">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" id="btn-quick-import-browser">🌐 浏览器提取</button>
               <button class="btn btn-secondary" id="btn-open-cookie-modal">🔑 更新 Cookie</button>
               <button class="btn btn-secondary" id="btn-test-cookie-dash">🔍 即刻测试 Cookie</button>
             </div>
@@ -192,7 +223,9 @@
                 </tr>
               </thead>
               <tbody id="users-tbody">
-                <tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 40px;">加载中...</td></tr>
+                <tr>
+                  <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 40px;">加载中...</td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -215,7 +248,6 @@
             <button class="settings-tab-btn active" data-subtab="subtab-basic">基础采集设置</button>
             <button class="settings-tab-btn" data-subtab="subtab-cookie">Cookie 与安全</button>
             <button class="settings-tab-btn" data-subtab="subtab-media">媒体与文件</button>
-            <button class="settings-tab-btn" data-subtab="subtab-output">数据存储输出</button>
             <button class="settings-tab-btn" data-subtab="subtab-advanced">评论转发互动</button>
             <button class="settings-tab-btn" data-subtab="subtab-antiban">🛡️ 反封禁策略</button>
           </div>
@@ -250,7 +282,8 @@
               <div class="form-group" style="margin-top: 18px;">
                 <label class="form-label">用户 ID 列表或文件 (user_id_list)</label>
                 <div class="form-desc">指定用户 ID 文件路径（如 user_id_list.txt）或逗号/换行分隔的多个用户 ID</div>
-                <input type="text" class="form-control" id="cfg-user-id-list" placeholder="user_id_list.txt 或 1669879400, 12345678" value="user_id_list.txt">
+                <input type="text" class="form-control" id="cfg-user-id-list"
+                  placeholder="user_id_list.txt 或 1669879400, 12345678" value="user_id_list.txt">
               </div>
 
               <div class="form-group">
@@ -286,6 +319,40 @@
             <!-- Subtab 2: Cookie -->
             <div class="settings-group-section" id="subtab-cookie">
               <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 18px;">Cookie 认证与报警</h3>
+
+              <!-- Browser Auto-import Card -->
+              <div class="browser-import-banner">
+                <div
+                  style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                  <div>
+                    <div
+                      style="font-weight: 600; font-size: 0.92rem; color: #93c5fd; display: flex; align-items: center; gap: 6px;">
+                      <span>🌐</span> 从本地浏览器一键同步 Cookie
+                    </div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 3px;">
+                      直接从 Chrome、Edge、Firefox、Safari、Arc 等读取已登录凭证，免手动复制
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <select class="form-control form-control-sm" id="select-settings-browser"
+                      style="width: auto; padding: 5px 12px; font-size: 0.85rem;">
+                      <option value="auto">自动探测 (推荐)</option>
+                      <option value="chrome" selected>Google Chrome</option>
+                      <option value="edge">Microsoft Edge</option>
+                      <option value="firefox">Mozilla Firefox</option>
+                      <option value="safari">Apple Safari</option>
+                      <option value="brave">Brave</option>
+                      <option value="arc">Arc</option>
+                      <option value="opera">Opera</option>
+                    </select>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-settings-import-browser">🚀
+                      提取并填入</button>
+                  </div>
+                </div>
+                <div id="settings-browser-import-status"
+                  style="display: none; margin-top: 10px; font-size: 0.82rem; padding: 6px 10px; border-radius: 4px;">
+                </div>
+              </div>
 
               <div class="form-group">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -404,275 +471,32 @@
 
               <!-- Folder name mappings: download_folder_name -->
               <div class="settings-section-divider">📁 本地媒体存储子目录名称映射 (download_folder_name)</div>
-              <div style="font-size: 0.82rem; color: var(--text-dim); margin-bottom: 12px;">自定义不同媒体类型在本地创建的存储子文件夹名称</div>
+              <div style="font-size: 0.82rem; color: var(--text-dim); margin-bottom: 12px;">自定义不同媒体类型在本地创建的存储子文件夹名称
+              </div>
               <div class="grid-3-col">
                 <div class="form-group">
                   <label class="form-label" style="font-size: 0.82rem;">原创图片目录</label>
-                  <input type="text" class="form-control" id="cfg-df-orig-img" value="原创微博图片">
+                  <input type="text" class="form-control" id="cfg-df-orig-img" value="img">
                 </div>
                 <div class="form-group">
                   <label class="form-label" style="font-size: 0.82rem;">转发图片目录</label>
-                  <input type="text" class="form-control" id="cfg-df-retweet-img" value="转发微博图片">
+                  <input type="text" class="form-control" id="cfg-df-retweet-img" value="img">
                 </div>
                 <div class="form-group">
                   <label class="form-label" style="font-size: 0.82rem;">原创视频目录</label>
-                  <input type="text" class="form-control" id="cfg-df-orig-video" value="原创微博视频">
+                  <input type="text" class="form-control" id="cfg-df-orig-video" value="video">
                 </div>
                 <div class="form-group">
                   <label class="form-label" style="font-size: 0.82rem;">转发视频目录</label>
-                  <input type="text" class="form-control" id="cfg-df-retweet-video" value="转发微博视频">
+                  <input type="text" class="form-control" id="cfg-df-retweet-video" value="video">
                 </div>
                 <div class="form-group">
                   <label class="form-label" style="font-size: 0.82rem;">原创 LivePhoto 目录</label>
-                  <input type="text" class="form-control" id="cfg-df-orig-livephoto" value="原创微博Live Photo视频">
+                  <input type="text" class="form-control" id="cfg-df-orig-livephoto" value="live_photo">
                 </div>
                 <div class="form-group">
                   <label class="form-label" style="font-size: 0.82rem;">转发 LivePhoto 目录</label>
-                  <input type="text" class="form-control" id="cfg-df-retweet-livephoto" value="转发微博Live Photo视频">
-                </div>
-              </div>
-            </div>
-
-            <!-- Subtab 4: Output -->
-            <div class="settings-group-section" id="subtab-output">
-              <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 18px;">数据输出格式 (write_mode)</h3>
-
-              <div class="form-group">
-                <label class="form-label">勾选需要生成并写入的目标格式：</label>
-                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 12px;">
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="csv"> CSV 文件
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="json"> JSON 文件
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="markdown"> Markdown
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="sqlite"> SQLite 数据库
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="mysql"> MySQL
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="mongo"> MongoDB
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" class="cfg-writemode-cb" value="post"> HTTP POST
-                  </label>
-                </div>
-              </div>
-
-              <div class="switch-wrap" style="margin-top: 24px;">
-                <div class="switch-label-wrap">
-                  <span class="switch-label-title">使用 UID 作为文件夹名称 (user_id_as_folder_name)</span>
-                  <span class="switch-label-subtitle">关：使用用户昵称（如 Dear-迪丽热巴）；开：使用纯数字 UID</span>
-                </div>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="cfg-uid-folder">
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <!-- Dynamic Configuration Sub-cards for Databases & Formats -->
-              
-              <!-- MySQL Configuration Card -->
-              <div class="config-sub-card" id="card-cfg-mysql">
-                <div class="config-sub-card-header">
-                  <div class="config-sub-card-title">
-                    <span>🐬 MySQL 数据库连接配置 (mysql_config)</span>
-                    <span class="badge-tag">write_mode: mysql</span>
-                  </div>
-                </div>
-                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 14px;">
-                  <div class="form-group">
-                    <label class="form-label">主机地址 (host)</label>
-                    <input type="text" class="form-control" id="cfg-mysql-host" placeholder="localhost 或 127.0.0.1" value="localhost">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">端口 (port)</label>
-                    <input type="number" class="form-control" id="cfg-mysql-port" placeholder="3306" value="3306">
-                  </div>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-                  <div class="form-group">
-                    <label class="form-label">用户名 (user)</label>
-                    <input type="text" class="form-control" id="cfg-mysql-user" placeholder="root" value="root">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">密码 (password)</label>
-                    <div class="input-with-action">
-                      <input type="password" class="form-control" id="cfg-mysql-password" placeholder="数据库密码">
-                      <button type="button" class="input-action-btn" id="btn-toggle-mysql-pwd">👁️</button>
-                    </div>
-                  </div>
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label">字符集编码 (charset)</label>
-                  <input type="text" class="form-control" id="cfg-mysql-charset" value="utf8mb4">
-                  <div class="form-desc" style="margin-top: 4px;">推荐保持 utf8mb4 以完整支持 Emoji 表情符号</div>
-                </div>
-              </div>
-
-              <!-- MongoDB Configuration Card -->
-              <div class="config-sub-card" id="card-cfg-mongo">
-                <div class="config-sub-card-header">
-                  <div class="config-sub-card-title">
-                    <span>🍃 MongoDB 数据库连接配置 (mongodb_URI)</span>
-                    <span class="badge-tag">write_mode: mongo</span>
-                  </div>
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label">MongoDB 连接 URI (mongodb_URI)</label>
-                  <div class="form-desc">标准 MongoDB 连接字符串，例如包含鉴权数据库的完整 URI</div>
-                  <input type="text" class="form-control" id="cfg-mongo-uri" placeholder="mongodb://root:password@localhost:27017/weibo?authSource=admin">
-                </div>
-              </div>
-
-              <!-- SQLite Configuration Card -->
-              <div class="config-sub-card" id="card-cfg-sqlite">
-                <div class="config-sub-card-header">
-                  <div class="config-sub-card-title">
-                    <span>📦 SQLite 本地数据库配置</span>
-                    <span class="badge-tag">write_mode: sqlite</span>
-                  </div>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">SQLite 数据库文件路径 (sqlite_db_path)</label>
-                  <input type="text" class="form-control" id="cfg-sqlite-path" placeholder="weibodata.db" value="weibodata.db">
-                </div>
-                <div class="switch-wrap" style="margin-bottom: 0;">
-                  <div class="switch-label-wrap">
-                    <span class="switch-label-title">在 SQLite 中存储媒体二进制 (store_binary_in_sqlite)</span>
-                    <span class="switch-label-subtitle">开启后将图片/视频的二进制原始字节直接存储在数据库 BLOB 字段中</span>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="cfg-sqlite-binary">
-                    <span class="slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <!-- HTTP POST Configuration Card -->
-              <div class="config-sub-card" id="card-cfg-post">
-                <div class="config-sub-card-header">
-                  <div class="config-sub-card-title">
-                    <span>🌐 HTTP POST Webhook 转发配置 (post_config)</span>
-                    <span class="badge-tag">write_mode: post</span>
-                  </div>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Webhook 接收接口 URL (api_url)</label>
-                  <input type="text" class="form-control" id="cfg-post-url" placeholder="https://api.yourdomain.com/v1/webhook">
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label">认证 Token 密钥 (api_token)</label>
-                  <input type="text" class="form-control" id="cfg-post-token" placeholder="Bearer Token 或密钥">
-                </div>
-              </div>
-
-              <!-- Markdown Format Configuration Card -->
-              <div class="config-sub-card" id="card-cfg-markdown">
-                <div class="config-sub-card-header">
-                  <div class="config-sub-card-title">
-                    <span>📝 Markdown 归档与排版配置</span>
-                    <span class="badge-tag">write_mode: markdown</span>
-                  </div>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-                  <div class="form-group">
-                    <label class="form-label">文档文件分割方式 (markdown_split_by)</label>
-                    <select class="form-control" id="cfg-md-split">
-                      <option value="day_by_month">按天分割归档到月度子目录 (day_by_month)</option>
-                      <option value="day">按天平铺保存 (day)</option>
-                      <option value="month">按月归档单个文件 (month)</option>
-                      <option value="year">按年归档单个文件 (year)</option>
-                      <option value="all">所有微博汇总在单文件 (all)</option>
-                    </select>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">微博时间排序规则 (markdown_sort_order)</label>
-                    <select class="form-control" id="cfg-md-order">
-                      <option value="new_to_old">从新到旧 (最新微博在前)</option>
-                      <option value="old_to_new">从旧到新 (最早微博在前)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label">图片与 Live Photo 排列模式 (markdown_image_order)</label>
-                  <select class="form-control" id="cfg-md-img-order">
-                    <option value="live_photo_first">Live Photo 排在图片前面 (live_photo_first)</option>
-                    <option value="image_first_interleaved">图片优先，同名 Live Photo 插入到对应图片下方 (image_first_interleaved)</option>
-                  </select>
-                </div>
-
-                <div class="switch-wrap">
-                  <div class="switch-label-wrap">
-                    <span class="switch-label-title">生成缺失微博排查报告 (missing_weibo_report)</span>
-                    <span class="switch-label-subtitle">每次抓取结束后生成与上次相比缺失（被删除/被屏蔽）的微博报告</span>
-                  </div>
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="cfg-missing-report">
-                    <span class="slider"></span>
-                  </label>
-                </div>
-
-                <div class="settings-section-divider">🖼️ Markdown 内容嵌入预览开关 (markdown_preview)</div>
-                <div class="grid-4-col">
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-orig-img"> 原创图片预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-retweet-img"> 转发图片预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-inline-img"> 查看图片转预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-link"> 网页链接转预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-orig-video"> 原创视频预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-retweet-video"> 转发视频预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-orig-livephoto"> 原创 LivePhoto 预览
-                  </label>
-                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
-                    <input type="checkbox" id="cfg-mdp-retweet-livephoto"> 转发 LivePhoto 预览
-                  </label>
-                </div>
-
-                <div class="settings-section-divider">📂 Markdown 内部媒体相对链接目录 (markdown_file_dir)</div>
-                <div class="grid-3-col">
-                  <div class="form-group">
-                    <label class="form-label" style="font-size: 0.82rem;">原创图片链接路径</label>
-                    <input type="text" class="form-control" id="cfg-mfd-orig-img" value="img">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" style="font-size: 0.82rem;">转发图片链接路径</label>
-                    <input type="text" class="form-control" id="cfg-mfd-retweet-img" value="img">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" style="font-size: 0.82rem;">原创视频链接路径</label>
-                    <input type="text" class="form-control" id="cfg-mfd-orig-video" value="原创微博视频">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" style="font-size: 0.82rem;">转发视频链接路径</label>
-                    <input type="text" class="form-control" id="cfg-mfd-retweet-video" value="转发微博视频">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" style="font-size: 0.82rem;">原创 LivePhoto 路径</label>
-                    <input type="text" class="form-control" id="cfg-mfd-orig-livephoto" value="原创微博Live Photo视频">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" style="font-size: 0.82rem;">转发 LivePhoto 路径</label>
-                    <input type="text" class="form-control" id="cfg-mfd-retweet-livephoto" value="转发微博Live Photo视频">
-                  </div>
+                  <input type="text" class="form-control" id="cfg-df-retweet-livephoto" value="live_photo">
                 </div>
               </div>
             </div>
@@ -716,7 +540,8 @@
 
             <!-- Subtab 6: Anti-Ban Protection -->
             <div class="settings-group-section" id="subtab-antiban">
-              <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 18px;">🛡️ 智能反封禁与限频保护策略 (anti_ban_config)</h3>
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 18px;">🛡️ 智能反封禁与限频保护策略 (anti_ban_config)
+              </h3>
 
               <div class="switch-wrap">
                 <div class="switch-label-wrap">
@@ -780,7 +605,8 @@
                 <div class="form-group">
                   <label class="form-label">随机额外休息概率 (random_rest_probability)</label>
                   <div class="form-desc">每次休息后随机额外延长的概率 (0~1)</div>
-                  <input type="number" step="0.01" min="0" max="1" class="form-control" id="cfg-ab-rest-prob" value="0.01">
+                  <input type="number" step="0.01" min="0" max="1" class="form-control" id="cfg-ab-rest-prob"
+                    value="0.01">
                 </div>
               </div>
             </div>
@@ -789,7 +615,334 @@
 
         <!-- JSON Editor View (Initially Hidden) -->
         <div id="config-json-editor-container" style="display: none;">
-          <textarea class="form-control" id="raw-json-editor" style="height: 520px; font-family: var(--font-mono); font-size: 0.88rem; line-height: 1.5;"></textarea>
+          <textarea class="form-control" id="raw-json-editor"
+            style="height: 520px; font-family: var(--font-mono); font-size: 0.88rem; line-height: 1.5;"></textarea>
+        </div>
+      </section>
+
+      <!-- VIEW: Data Output & Storage -->
+      <section class="page-view" id="view-output">
+        <div class="content-box">
+          <div class="content-box-header" style="justify-content: space-between;">
+            <div>
+              <h3 style="font-size: 1.15rem; font-weight: 700;">📤 数据输出与存储配置</h3>
+              <p style="font-size: 0.82rem; color: var(--text-dim); margin-top: 4px;">
+                管理微博抓取结果的输出介质；每种格式配备独立开关，开启前自动校验必填配置项。
+              </p>
+            </div>
+            <button class="btn btn-primary" id="btn-save-output-config">💾 保存输出配置</button>
+          </div>
+
+          <div style="padding: 24px 28px;">
+            <div class="switch-wrap" style="margin-bottom: 22px;">
+              <div class="switch-label-wrap">
+                <span class="switch-label-title">使用 UID 作为文件夹名称 (user_id_as_folder_name)</span>
+                <span class="switch-label-subtitle">关：使用用户昵称（如 Dear-迪丽热巴）；开：使用纯数字 UID</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cfg-uid-folder">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- 基础文件格式 -->
+            <div class="settings-section-divider">📄 标准文本文件格式 (无需外部数据库)</div>
+            <div class="grid-2-col" style="margin-bottom: 22px;">
+              <div class="config-sub-card is-enabled" id="card-cfg-csv" style="margin-top: 0; padding: 18px 20px;">
+                <div class="config-sub-card-header" style="margin-bottom: 0; padding-bottom: 0; border-bottom: none;">
+                  <div class="config-sub-card-title">
+                    <span>📊 CSV 表格文件 (csv)</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="badge-tag" id="badge-status-csv">已开启</span>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="switch-mode-csv" class="cfg-mode-switch" data-mode="csv">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="form-desc" style="margin-top: 8px;">导出为逗号分隔的结构化表格，可用 Excel 直接打开分析</div>
+              </div>
+
+              <div class="config-sub-card is-enabled" id="card-cfg-json" style="margin-top: 0; padding: 18px 20px;">
+                <div class="config-sub-card-header" style="margin-bottom: 0; padding-bottom: 0; border-bottom: none;">
+                  <div class="config-sub-card-title">
+                    <span>📜 JSON 数据文件 (json)</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="badge-tag" id="badge-status-json">已开启</span>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="switch-mode-json" class="cfg-mode-switch" data-mode="json">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="form-desc" style="margin-top: 8px;">导出为标准 JSON 字典格式，包含微博文本与完整媒体字段</div>
+              </div>
+            </div>
+
+            <!-- 数据库与高级输出格式 -->
+            <div class="settings-section-divider">🗄️ 数据库连接与高级导出格式 (开启前自动校验完整性)</div>
+
+            <!-- MySQL Configuration Card -->
+            <div class="config-sub-card" id="card-cfg-mysql">
+              <div class="config-sub-card-header">
+                <div class="config-sub-card-title">
+                  <span>🐬 MySQL 关系型数据库 (mysql_config)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="badge-tag badge-tag-disabled" id="badge-status-mysql">未开启</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="switch-mode-mysql" class="cfg-mode-switch" data-mode="mysql">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 14px;">
+                <div class="form-group">
+                  <label class="form-label">主机地址 (host) <span style="color: var(--accent-rose);">*</span></label>
+                  <input type="text" class="form-control" id="cfg-mysql-host" placeholder="localhost 或 127.0.0.1"
+                    value="localhost">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">端口 (port) <span style="color: var(--accent-rose);">*</span></label>
+                  <input type="number" class="form-control" id="cfg-mysql-port" placeholder="3306" value="3306">
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                <div class="form-group">
+                  <label class="form-label">用户名 (user) <span style="color: var(--accent-rose);">*</span></label>
+                  <input type="text" class="form-control" id="cfg-mysql-user" placeholder="root" value="root">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">密码 (password) <span style="color: var(--accent-rose);">*</span></label>
+                  <div class="input-with-action">
+                    <input type="password" class="form-control" id="cfg-mysql-password" placeholder="数据库密码">
+                    <button type="button" class="input-action-btn" id="btn-toggle-mysql-pwd">👁️</button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">字符集编码 (charset)</label>
+                <input type="text" class="form-control" id="cfg-mysql-charset" value="utf8mb4">
+                <div class="form-desc" style="margin-top: 4px;">推荐保持 utf8mb4 以完整支持 Emoji 表情符号</div>
+              </div>
+              <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary" id="btn-test-mysql" style="padding: 6px 14px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 6px;">
+                  <span>⚡ 测试 MySQL 连通性</span>
+                </button>
+                <div id="test-result-mysql" style="font-size: 0.82rem; flex: 1; text-align: right;"></div>
+              </div>
+            </div>
+
+            <!-- MongoDB Configuration Card -->
+            <div class="config-sub-card" id="card-cfg-mongo">
+              <div class="config-sub-card-header">
+                <div class="config-sub-card-title">
+                  <span>🍃 MongoDB 文档数据库 (mongodb_URI)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="badge-tag badge-tag-disabled" id="badge-status-mongo">未开启</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="switch-mode-mongo" class="cfg-mode-switch" data-mode="mongo">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">MongoDB 连接 URI (mongodb_URI) <span
+                    style="color: var(--accent-rose);">*</span></label>
+                <div class="form-desc">标准 MongoDB 连接字符串，例如包含鉴权数据库的完整 URI</div>
+                <input type="text" class="form-control" id="cfg-mongo-uri"
+                  placeholder="mongodb://root:password@localhost:27017/weibo?authSource=admin">
+              </div>
+              <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary" id="btn-test-mongo" style="padding: 6px 14px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 6px;">
+                  <span>⚡ 测试 MongoDB 连通性</span>
+                </button>
+                <div id="test-result-mongo" style="font-size: 0.82rem; flex: 1; text-align: right;"></div>
+              </div>
+            </div>
+
+            <!-- SQLite Configuration Card -->
+            <div class="config-sub-card" id="card-cfg-sqlite">
+              <div class="config-sub-card-header">
+                <div class="config-sub-card-title">
+                  <span>📦 SQLite 本地数据库 (sqlite_db_path)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="badge-tag badge-tag-disabled" id="badge-status-sqlite">未开启</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="switch-mode-sqlite" class="cfg-mode-switch" data-mode="sqlite">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">SQLite 数据库文件路径 (sqlite_db_path) <span
+                    style="color: var(--accent-rose);">*</span></label>
+                <input type="text" class="form-control" id="cfg-sqlite-path" placeholder="weibodata.db"
+                  value="weibodata.db">
+              </div>
+              <div class="switch-wrap" style="margin-bottom: 0;">
+                <div class="switch-label-wrap">
+                  <span class="switch-label-title">在 SQLite 中存储媒体二进制 (store_binary_in_sqlite)</span>
+                  <span class="switch-label-subtitle">开启后将图片/视频的二进制原始字节直接存储在数据库 BLOB 字段中</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-sqlite-binary">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- HTTP POST Configuration Card -->
+            <div class="config-sub-card" id="card-cfg-post">
+              <div class="config-sub-card-header">
+                <div class="config-sub-card-title">
+                  <span>🌐 HTTP POST Webhook 实时推送 (post_config)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="badge-tag badge-tag-disabled" id="badge-status-post">未开启</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="switch-mode-post" class="cfg-mode-switch" data-mode="post">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Webhook 接收接口 URL (api_url) <span
+                    style="color: var(--accent-rose);">*</span></label>
+                <input type="text" class="form-control" id="cfg-post-url"
+                  placeholder="https://api.yourdomain.com/v1/webhook">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">认证 Token 密钥 (api_token)</label>
+                <input type="text" class="form-control" id="cfg-post-token" placeholder="Bearer Token 或密钥">
+              </div>
+              <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary" id="btn-test-post" style="padding: 6px 14px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 6px;">
+                  <span>⚡ 测试 Webhook 连通性</span>
+                </button>
+                <div id="test-result-post" style="font-size: 0.82rem; flex: 1; text-align: right;"></div>
+              </div>
+            </div>
+
+            <!-- Markdown Format Configuration Card -->
+            <div class="config-sub-card" id="card-cfg-markdown">
+              <div class="config-sub-card-header">
+                <div class="config-sub-card-title">
+                  <span>📝 Markdown 归档与图文排版 (markdown)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span class="badge-tag badge-tag-disabled" id="badge-status-markdown">未开启</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="switch-mode-markdown" class="cfg-mode-switch" data-mode="markdown">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                <div class="form-group">
+                  <label class="form-label">文档文件分割方式 (markdown_split_by)</label>
+                  <select class="form-control" id="cfg-md-split">
+                    <option value="day_by_month">按天分割归档到月度子目录 (day_by_month)</option>
+                    <option value="day">按天平铺保存 (day)</option>
+                    <option value="month">按月归档单个文件 (month)</option>
+                    <option value="year">按年归档单个文件 (year)</option>
+                    <option value="all">所有微博汇总在单文件 (all)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">微博时间排序规则 (markdown_sort_order)</label>
+                  <select class="form-control" id="cfg-md-order">
+                    <option value="new_to_old">从新到旧 (最新微博在前)</option>
+                    <option value="old_to_new">从旧到新 (最早微博在前)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">图片与 Live Photo 排列模式 (markdown_image_order)</label>
+                <select class="form-control" id="cfg-md-img-order">
+                  <option value="live_photo_first">Live Photo 排在图片前面 (live_photo_first)</option>
+                  <option value="image_first_interleaved">图片优先，同名 Live Photo 插入到对应图片下方 (image_first_interleaved)
+                  </option>
+                </select>
+              </div>
+
+              <div class="switch-wrap">
+                <div class="switch-label-wrap">
+                  <span class="switch-label-title">生成缺失微博排查报告 (missing_weibo_report)</span>
+                  <span class="switch-label-subtitle">每次抓取结束后生成与上次相比缺失（被删除/被屏蔽）的微博报告</span>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="cfg-missing-report">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="settings-section-divider">🖼️ Markdown 内容嵌入预览开关 (markdown_preview)</div>
+              <div class="grid-4-col">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-orig-img"> 原创图片预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-retweet-img"> 转发图片预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-inline-img"> 查看图片转预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-link"> 网页链接转预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-orig-video"> 原创视频预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-retweet-video"> 转发视频预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-orig-livephoto"> 原创 LivePhoto 预览
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer;">
+                  <input type="checkbox" id="cfg-mdp-retweet-livephoto"> 转发 LivePhoto 预览
+                </label>
+              </div>
+
+              <div class="settings-section-divider">📂 Markdown 内部媒体相对链接目录 (markdown_file_dir)</div>
+              <div class="grid-3-col">
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">原创图片链接路径</label>
+                  <input type="text" class="form-control" id="cfg-mfd-orig-img" value="img">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">转发图片链接路径</label>
+                  <input type="text" class="form-control" id="cfg-mfd-retweet-img" value="img">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">原创视频链接路径</label>
+                  <input type="text" class="form-control" id="cfg-mfd-orig-video" value="video">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">转发视频链接路径</label>
+                  <input type="text" class="form-control" id="cfg-mfd-retweet-video" value="video">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">原创 LivePhoto 路径</label>
+                  <input type="text" class="form-control" id="cfg-mfd-orig-livephoto" value="live_photo">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="font-size: 0.82rem;">转发 LivePhoto 路径</label>
+                  <input type="text" class="form-control" id="cfg-mfd-retweet-livephoto" value="live_photo">
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 28px; display: flex; justify-content: flex-end;">
+              <button class="btn btn-primary" id="btn-save-output-config-bottom">💾 保存输出配置</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -807,14 +960,17 @@
             </div>
 
             <div class="terminal-controls">
-              <input type="text" class="search-input" id="log-search-input" style="width: 180px; padding: 4px 10px;" placeholder="检索关键词...">
-              <select class="form-control" id="log-level-select" style="width: 100px; padding: 4px 8px; font-size: 0.8rem;">
+              <input type="text" class="search-input" id="log-search-input" style="width: 180px; padding: 4px 10px;"
+                placeholder="检索关键词...">
+              <select class="form-control" id="log-level-select"
+                style="width: 100px; padding: 4px 8px; font-size: 0.8rem;">
                 <option value="ALL">全部级别</option>
                 <option value="INFO">INFO</option>
                 <option value="WARNING">WARNING</option>
                 <option value="ERROR">ERROR</option>
               </select>
-              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; color: var(--text-muted);">
+              <label
+                style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; color: var(--text-muted);">
                 <input type="checkbox" id="auto-scroll-toggle" checked> 自动滚屏
               </label>
               <button class="btn btn-secondary btn-sm" id="btn-clear-logs">清屏</button>
@@ -830,13 +986,41 @@
       <!-- VIEW 5: Data Explorer -->
       <section class="page-view" id="view-data">
         <div class="content-box">
-          <div class="content-box-header">
-            <div style="display: flex; gap: 10px; align-items: center; flex: 1; max-width: 480px;">
-              <input type="text" class="form-control" id="data-search-keyword" placeholder="搜索微博正文关键词..." style="flex: 1; min-width: 0;">
-              <button class="btn btn-secondary" id="btn-search-data" style="white-space: nowrap; flex-shrink: 0;">查询</button>
+          <div class="data-filter-bar">
+            <div class="data-filter-row">
+              <!-- 按博主筛选 -->
+              <div class="data-filter-item" style="min-width: 170px;">
+                <label class="data-filter-label" for="data-filter-user">👤 博主筛选</label>
+                <select class="form-control" id="data-filter-user">
+                  <option value="">全部博主</option>
+                </select>
+              </div>
+
+              <!-- 按发布时间区间筛选 -->
+              <div class="data-filter-item">
+                <label class="data-filter-label">📅 发布时间区间</label>
+                <div class="date-range-group">
+                  <input type="date" class="form-control" id="data-filter-start-date" title="发布起始日期">
+                  <span class="date-range-separator">至</span>
+                  <input type="date" class="form-control" id="data-filter-end-date" title="发布截止日期">
+                </div>
+              </div>
+
+              <!-- 关键词查询 -->
+              <div class="data-filter-item data-filter-keyword-item">
+                <label class="data-filter-label" for="data-search-keyword">🔍 正文关键词</label>
+                <input type="text" class="form-control" id="data-search-keyword" placeholder="搜索微博正文关键词...">
+              </div>
+
+              <!-- 操作按钮 -->
+              <div class="data-filter-actions">
+                <button class="btn btn-primary" id="btn-search-data">查询</button>
+                <button class="btn btn-secondary" id="btn-reset-data" title="清空全部筛选条件">重置</button>
+              </div>
             </div>
-            <div style="font-size: 0.85rem; color: var(--text-muted);" id="data-total-label">
-              共 0 条数据
+
+            <div class="data-filter-meta">
+              <span style="font-size: 0.85rem; color: var(--text-muted);" id="data-total-label">共 0 条数据</span>
             </div>
           </div>
 
@@ -852,20 +1036,437 @@
                 </tr>
               </thead>
               <tbody id="data-tbody">
-                <tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 40px;">暂无本地数据或未启用 SQLite 数据库</td></tr>
+                <tr>
+                  <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 40px;">暂无本地数据或未启用 SQLite
+                    数据库</td>
+                </tr>
               </tbody>
             </table>
           </div>
 
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-top: 1px solid var(--border-subtle);">
+          <div
+            style="display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-top: 1px solid var(--border-subtle);">
             <button class="btn btn-secondary btn-sm" id="btn-data-prev">上一页</button>
             <span style="font-size: 0.85rem; color: var(--text-muted);" id="data-page-indicator">第 1 页</span>
             <button class="btn btn-secondary btn-sm" id="btn-data-next">下一页</button>
           </div>
         </div>
       </section>
-    </main>
-  </div>
+
+      <!-- VIEW 6: RESTful API Documentation -->
+      <section class="page-view" id="view-api">
+        <!-- API Overview Banner -->
+        <div class="content-box" style="margin-bottom: 24px;">
+          <div class="api-docs-header">
+            <div>
+              <h2 style="font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 10px;">
+                <span>🔌</span> RESTful API 接口中心
+              </h2>
+              <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">
+                提供标准化 HTTP 接口供外部系统、微服务、定时脚本或自动化流水线深度集成与远程调度。
+              </p>
+            </div>
+            <div class="api-base-url-pill">
+              <span class="url-label">BASE URL:</span>
+              <code id="api-base-url-display">http://127.0.0.1:5001</code>
+            </div>
+          </div>
+
+          <div class="api-filter-toolbar">
+            <div class="api-category-tabs">
+              <button class="api-cat-btn active" data-cat="all">全部 (ALL)</button>
+              <button class="api-cat-btn" data-cat="service">进程调度</button>
+              <button class="api-cat-btn" data-cat="targets">目标管理</button>
+              <button class="api-cat-btn" data-cat="config">配置中心</button>
+              <button class="api-cat-btn" data-cat="cookie">Cookie认证</button>
+              <button class="api-cat-btn" data-cat="test">连通测试</button>
+              <button class="api-cat-btn" data-cat="data">日志与数据</button>
+              <button class="api-cat-btn" data-cat="legacy">经典兼容</button>
+            </div>
+            <div class="api-search-box">
+              <input type="text" class="form-control" id="api-search-input" placeholder="按路径、方法或描述过滤 API...">
+            </div>
+          </div>
+        </div>
+
+        <!-- API Cards Container -->
+        <div class="api-endpoints-container" id="api-endpoints-list">
+
+          <!-- 1. 服务调度 -->
+          <div class="api-card" data-cat="service" data-search="get /api/status 运行状态 监控 指标 pid">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/status</span>
+              </div>
+              <span class="api-summary">获取服务运行状态、进程信息与大屏核心监控指标</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "code": 200,
+  "data": {
+    "status": "RUNNING",
+    "is_running": true,
+    "pid": 58321,
+    "duration": "00:05:21",
+    "current_user": "迪丽热巴",
+    "crawled_count": 86,
+    "metrics": { "user_count": 3, "total_weibos": 1420, "db_connected": true }
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="service" data-search="post /api/service/start 启动爬虫 启动任务 进程">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/service/start</span>
+              </div>
+              <span class="api-summary">启动后台微博数据采集子进程 (weibo.py)</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON, 可选)</div>
+              <pre class="api-code-block"><code>// 指定本次运行仅采纳的用户列表（留空则默认按监控列表执行）
+{
+  "user_id_list": ["1669879400"]
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="service" data-search="post /api/service/stop 停止爬虫 终止运行 进程">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/service/stop</span>
+              </div>
+              <span class="api-summary">优雅停止正在运行中的爬虫子进程 (SIGTERM，已采数据自动保存)</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "code": 200,
+  "success": true,
+  "message": "爬虫已成功停止",
+  "data": { "status": "STOPPED" }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="service" data-search="post /api/service/restart 重启爬虫 重启进程">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/service/restart</span>
+              </div>
+              <span class="api-summary">停止当前爬虫并以最新配置重新拉起进程</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON, 可选)</div>
+              <pre class="api-code-block"><code>{
+  "user_id_list": ["1669879400"]
+}</code></pre>
+            </div>
+          </div>
+
+          <!-- 2. 目标管理 -->
+          <div class="api-card" data-cat="targets" data-search="get /api/users 目标博主 用户列表">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/users</span>
+              </div>
+              <span class="api-summary">获取当前已配置的目标博主列表与增量采集参数</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "code": 200,
+  "total": 1,
+  "data": [
+    { "id": "1669879400", "screen_name": "Dear-迪丽热巴", "since_date": "2024-01-01", "query": "" }
+  ]
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="targets" data-search="post /api/users 添加博主 更新用户">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/users</span>
+              </div>
+              <span class="api-summary">添加新目标博主或修改已有博主采集参数</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "id": "1669879400",          // 必填：纯数字 UID
+  "screen_name": "迪丽热巴",    // 可选：个性化备注
+  "since_date": "2024-01-01",  // 可选：起始日期或天数
+  "query": "活动,日常"         // 可选：关键词过滤
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="targets" data-search="delete /api/users/ 删除博主 移除用户">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-delete">DELETE</span>
+                <span class="api-path">/api/users/&lt;user_id&gt;</span>
+              </div>
+              <span class="api-summary">从监控目标队列中移除指定的博主</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">调用示例</div>
+              <pre class="api-code-block"><code>curl -X DELETE http://127.0.0.1:5001/api/users/1669879400</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="targets" data-search="post /api/users/import 批量导入 博主列表">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/users/import</span>
+              </div>
+              <span class="api-summary">支持多行文本批量导入目标博主（追加或覆盖）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "text": "1669879400 迪丽热巴 2024-01-01\n1223178222 胡歌",
+  "mode": "append"  // "append" (追加) 或 "overwrite" (覆盖)
+}</code></pre>
+            </div>
+          </div>
+
+          <!-- 3. 配置中心 -->
+          <div class="api-card" data-cat="config" data-search="get /api/config 读取配置 config.json">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/config</span>
+              </div>
+              <span class="api-summary">读取当前生效的 config.json 原始文本与结构化解析字典</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "code": 200,
+  "raw": "{\n  \"cookie\": \"...\"\n}",
+  "parsed": { "write_mode": ["csv", "sqlite"], "cookie": "..." },
+  "is_custom_config": true
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="config" data-search="post /api/config 保存配置 更新配置">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/config</span>
+              </div>
+              <span class="api-summary">在线校验并保存配置（支持 raw 字符串或 parsed 字典对象）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "parsed": {
+    "only_crawl_original": 1,
+    "write_mode": ["csv", "sqlite", "mysql"]
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <!-- 4. Cookie 认证 -->
+          <div class="api-card" data-cat="cookie" data-search="post /api/cookie/check 测试 cookie 连通性 时延">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/cookie/check</span>
+              </div>
+              <span class="api-summary">探针测试指定或已存 Cookie 的连通有效性、网络时延与用户信息</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体与响应</div>
+              <pre class="api-code-block"><code>// Request Body (可选，不传测试已保存 Cookie):
+{ "cookie": "SUB=xxx; SUBP=yyy;" }
+
+// Response (200 OK):
+{
+  "code": 200,
+  "valid": true,
+  "message": "Cookie 有效！响应时延: 168ms",
+  "user": { "id": "2837199120", "screen_name": "开发者" }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="cookie" data-search="get /api/cookie/browsers 探测 浏览器 chrome edge">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/cookie/browsers</span>
+              </div>
+              <span class="api-summary">探测本机已安装且支持免密提取 Cookie 的浏览器列表</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "code": 200,
+  "rookiepy_available": true,
+  "browsers": [
+    { "id": "auto", "name": "自动探测已登录浏览器 (推荐)" },
+    { "id": "chrome", "name": "Google Chrome" },
+    { "id": "edge", "name": "Microsoft Edge" }
+  ]
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="cookie" data-search="post /api/cookie/import_browser 浏览器免密提取 cookie">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/cookie/import_browser</span>
+              </div>
+              <span class="api-summary">一键从本地浏览器安全提取微博已登录 Cookie（仅限 localhost 调用）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "browser": "auto",  // 浏览器标识符 ("auto", "chrome", "edge" 等)
+  "save": true        // 提取成功后是否自动写入 config.json
+}</code></pre>
+            </div>
+          </div>
+
+          <!-- 5. 存储介质测试 -->
+          <div class="api-card" data-cat="test" data-search="post /api/test/mysql 连通性测试 数据库 mysql">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/test/mysql</span>
+              </div>
+              <span class="api-summary">在线测试 MySQL 数据库连接、认证握手与时延</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "host": "127.0.0.1", "port": 3306,
+  "user": "root", "password": "yourpassword", "charset": "utf8mb4"
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="test" data-search="post /api/test/mongodb 连通性测试 mongodb uri">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/test/mongodb</span>
+              </div>
+              <span class="api-summary">在线测试 MongoDB 数据库连接与版本状态</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "uri": "mongodb://localhost:27017/weibo?authSource=admin"
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="test" data-search="post /api/test/webhook 连通性测试 webhook post">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/test/webhook</span>
+              </div>
+              <span class="api-summary">向 Webhook 接口发送 ping 探测包并测试 HTTP 响应状态</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "url": "https://api.example.com/webhook",
+  "token": "secret_token_123"
+}</code></pre>
+            </div>
+          </div>
+
+          <!-- 6. 日志与数据 -->
+          <div class="api-card" data-cat="data" data-search="get /api/logs 运行日志 终端 输出">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/logs</span>
+              </div>
+              <span class="api-summary">拉取内存缓冲区实时运行日志行（支持等级和关键字检索）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">Query 参数</div>
+              <pre class="api-code-block"><code>?limit=200&level=ALL&keyword=正在抓取</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="data" data-search="get /api/data/weibos 数据预览 查询 检索 sqlite">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/data/weibos</span>
+              </div>
+              <span class="api-summary">多维条件检索与分页查询 SQLite 数据库中的已入库微博数据</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">Query 参数与响应</div>
+              <pre class="api-code-block"><code>// Request: ?page=1&page_size=10&user_id=1669879400&start_date=2024-01-01&end_date=2024-01-07&keyword=活动
+// Response (200 OK):
+{
+  "code": 200,
+  "data": {
+    "total": 128, "page": 1, "page_size": 10,
+    "items": [ { "id": "49581902830182", "screen_name": "迪丽热巴", "text": "活动照" } ],
+    "available_users": [ { "user_id": "1669879400", "screen_name": "迪丽热巴" } ]
+  }
+}</code></pre>
+            </div>
+          </div>
+
+          <!-- 7. 经典兼容 -->
+          <div class="api-card" data-cat="legacy" data-search="post /refresh 兼容 历史接口 task_id">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/refresh</span>
+              </div>
+              <span class="api-summary">经典兼容触发接口（返回 202 Accepted 或 409 Conflict，含 task_id）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON, 可选)</div>
+              <pre class="api-code-block"><code>{ "user_id_list": ["6067225218"] }</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="legacy" data-search="get /task/ 兼容 任务查询 progress">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/task/&lt;task_id&gt;</span>
+              </div>
+              <span class="api-summary">经典兼容任务进度状态轮询接口</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "state": "PROGRESS",
+  "progress": 50,
+  "result": { "status": "RUNNING" }
+}</code></pre>
+            </div>
+          </div>
+
+        </div>
+      </section>
 
   <!-- Modal 1: Add User -->
   <div class="modal-overlay" id="modal-add-user">
@@ -912,7 +1513,8 @@
         <div class="form-desc" style="margin-bottom: 12px;">
           每行输入一个用户，格式为：<code>用户ID [昵称] [起始日期] [关键词]</code>（以空格分隔）
         </div>
-        <textarea class="form-control" id="import-text-area" rows="8" placeholder="1669879400 迪丽热巴 2024-01-01&#10;1223178222 胡歌&#10;1729370543 郭碧婷 3 电影"></textarea>
+        <textarea class="form-control" id="import-text-area" rows="8"
+          placeholder="1669879400 迪丽热巴 2024-01-01&#10;1223178222 胡歌&#10;1729370543 郭碧婷 3 电影"></textarea>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary modal-close" data-modal="modal-import-users">取消</button>
@@ -923,16 +1525,46 @@
 
   <!-- Modal 3: Quick Update Cookie -->
   <div class="modal-overlay" id="modal-update-cookie">
-    <div class="modal-box" style="max-width: 600px;">
+    <div class="modal-box" style="max-width: 620px;">
       <div class="modal-header">
         <h3 style="font-size: 1.1rem; font-weight: 700;">🔑 快速更新微博 Cookie</h3>
         <button class="btn-icon modal-close" data-modal="modal-update-cookie">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-desc" style="margin-bottom: 12px; line-height: 1.6;">
-          粘贴浏览器登录微博（建议 weibo.com 或 m.weibo.cn）后开发者工具中的完整 Cookie 字符串。保存后将自动同步更新 <code>config.json</code> 并即时生效。
+        <!-- Browser Auto-import Bar (方案A) -->
+        <div class="browser-import-banner">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.15rem;">🌐</span>
+              <div>
+                <div style="font-weight: 600; font-size: 0.88rem; color: #93c5fd;">从已登录浏览器一键读取 (免手动复制)</div>
+                <div style="font-size: 0.74rem; color: var(--text-muted);">自动读取本地浏览器中的微博 Cookie 并填入</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select class="form-control form-control-sm" id="select-modal-browser"
+                style="width: auto; padding: 4px 10px; font-size: 0.82rem;">
+                <option value="auto">自动探测</option>
+                <option value="chrome" selected>Google Chrome</option>
+                <option value="edge">Microsoft Edge</option>
+                <option value="firefox">Firefox</option>
+                <option value="safari">Safari</option>
+                <option value="brave">Brave</option>
+                <option value="arc">Arc</option>
+                <option value="opera">Opera</option>
+              </select>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-modal-import-browser">🚀 提取并填入</button>
+            </div>
+          </div>
+          <div id="modal-browser-import-status"
+            style="display: none; margin-top: 10px; font-size: 0.82rem; padding: 6px 10px; border-radius: 4px;"></div>
         </div>
-        <textarea class="form-control" id="quick-cookie-input" rows="6" placeholder="SUB=...; SUBP=...; _T_WM=..."></textarea>
+
+        <div class="form-desc" style="margin-bottom: 8px; line-height: 1.5;">
+          或手动粘贴在 weibo.com 登录后的完整 Cookie 字符串：
+        </div>
+        <textarea class="form-control" id="quick-cookie-input" rows="5"
+          placeholder="SUB=...; SUBP=...; _T_WM=..."></textarea>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary modal-close" data-modal="modal-update-cookie">取消</button>
@@ -944,6 +1576,7 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/js/console.js"></script>
+  <script src="/static/js/console.js?v=3"></script>
 </body>
+
 </html>

@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initUsersManager();
   initLogStreamer();
   initDataExplorer();
+  initApiDocs();
 
   // Start polling
   fetchStatus();
@@ -75,7 +76,7 @@ function initTheme() {
   });
 }
 
-// Navigation Tabs
+// Navigation Tabs & Routing
 function initNavigation() {
   const navItems = document.querySelectorAll('.nav-item');
   const pageViews = document.querySelectorAll('.page-view');
@@ -86,35 +87,99 @@ function initNavigation() {
     dashboard: { title: '总览控制', subtitle: '监控爬虫实时运行状态与全局任务调度' },
     targets: { title: '目标管理', subtitle: '维护微博采集目标用户队列与增量配置' },
     settings: { title: '参数配置', subtitle: '可视化调整所有爬虫参数或编辑 config.json 源码' },
+    output: { title: '数据存储', subtitle: '配置结构化文本、数据库与 Webhook 目标介质及开关' },
     logs: { title: '实时日志', subtitle: '实时捕捉爬虫标准输出与错误排查' },
-    data: { title: '数据预览', subtitle: '探索本地 SQLite 数据库中采集到的历史数据' }
+    data: { title: '数据预览', subtitle: '探索本地 SQLite 数据库中采集到的历史数据' },
+    api: { title: 'RESTful API 接口中心', subtitle: '标准化 HTTP 接口调用规范、参数说明与系统集成' }
   };
 
+  function resolveTabFromUrl() {
+    // 1. Pathname: /targets, /console/targets, /output, /api-docs, etc.
+    const pathname = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    if (pathname) {
+      const parts = pathname.split('/');
+      const lastSegment = parts[parts.length - 1];
+      if (lastSegment === 'api' || lastSegment === 'api-docs' || lastSegment === 'docs') return 'api';
+      if (titles[lastSegment]) return lastSegment;
+    }
+
+    // 2. Query param: ?tab=targets
+    const urlParams = new URLSearchParams(window.location.search);
+    const qTab = urlParams.get('tab');
+    if (qTab) {
+      if (qTab === 'api' || qTab === 'api-docs' || qTab === 'docs') return 'api';
+      if (titles[qTab]) return qTab;
+    }
+
+    // 3. Hash: #targets
+    const hashTab = window.location.hash.replace('#', '');
+    if (hashTab) {
+      if (hashTab === 'api' || hashTab === 'api-docs' || hashTab === 'docs') return 'api';
+      if (titles[hashTab]) return hashTab;
+    }
+
+    return 'dashboard';
+  }
+
+  function switchTab(tab, updateHistory = true) {
+    if (!titles[tab]) tab = 'dashboard';
+
+    navItems.forEach(n => {
+      if (n.getAttribute('data-tab') === tab) {
+        n.classList.add('active');
+      } else {
+        n.classList.remove('active');
+      }
+    });
+
+    pageViews.forEach(v => v.classList.remove('active'));
+    const activeView = document.getElementById(`view-${tab}`);
+    if (activeView) activeView.classList.add('active');
+
+    state.currentTab = tab;
+    if (titles[tab]) {
+      pageTitle.textContent = titles[tab].title;
+      pageSubtitle.textContent = titles[tab].subtitle;
+      document.title = `${titles[tab].title} - Weibo Crawler Web 控制台`;
+    }
+
+    // Update browser URL route
+    if (updateHistory) {
+      const targetUrl = tab === 'dashboard' ? '/' : (tab === 'api' ? '/api-docs' : `/${tab}`);
+      if (window.location.pathname !== targetUrl) {
+        window.history.pushState({ tab }, '', targetUrl);
+      }
+    }
+
+    // Tab specific refresh
+    if (tab === 'targets') fetchUsers();
+    if (tab === 'settings' || tab === 'output') fetchConfig();
+    if (tab === 'logs') fetchLogs();
+    if (tab === 'data') fetchData();
+    if (tab === 'api') {
+      const baseEl = document.getElementById('api-base-url-display');
+      if (baseEl) baseEl.textContent = window.location.origin;
+    }
+  }
+
+  // Bind click handlers to menu items
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const tab = item.getAttribute('data-tab');
       if (tab === state.currentTab) return;
-
-      navItems.forEach(n => n.classList.remove('active'));
-      item.classList.add('active');
-
-      pageViews.forEach(v => v.classList.remove('active'));
-      const activeView = document.getElementById(`view-${tab}`);
-      if (activeView) activeView.classList.add('active');
-
-      state.currentTab = tab;
-      if (titles[tab]) {
-        pageTitle.textContent = titles[tab].title;
-        pageSubtitle.textContent = titles[tab].subtitle;
-      }
-
-      // Tab specific refresh
-      if (tab === 'targets') fetchUsers();
-      if (tab === 'settings') fetchConfig();
-      if (tab === 'logs') fetchLogs();
-      if (tab === 'data') fetchData();
+      switchTab(tab, true);
     });
   });
+
+  // Handle browser back/forward buttons
+  window.addEventListener('popstate', (e) => {
+    const tab = (e.state && e.state.tab) || resolveTabFromUrl();
+    switchTab(tab, false);
+  });
+
+  // Initial tab resolution on page load
+  const initialTab = resolveTabFromUrl();
+  switchTab(initialTab, false);
 }
 
 // Status & Process Controls
@@ -236,12 +301,37 @@ function initControlButtons() {
   // Dashboard Cookie Test & Update
   document.getElementById('btn-test-cookie-dash').addEventListener('click', runCookieCheck);
 
+  const quickImportBtn = document.getElementById('btn-quick-import-browser');
+  if (quickImportBtn) {
+    quickImportBtn.addEventListener('click', () => {
+      openModal('modal-update-cookie');
+      const modalBrowser = document.getElementById('select-modal-browser');
+      if (modalBrowser) modalBrowser.value = 'auto';
+      importCookieFromBrowser({
+        browserSelectId: 'select-modal-browser',
+        statusDivId: 'modal-browser-import-status',
+        targetInputId: 'quick-cookie-input'
+      });
+    });
+  }
+
   const openCookieBtn = document.getElementById('btn-open-cookie-modal');
   if (openCookieBtn) {
     openCookieBtn.addEventListener('click', () => {
       const currentCookie = (state.currentConfig && state.currentConfig.cookie) || document.getElementById('cfg-cookie')?.value || '';
       document.getElementById('quick-cookie-input').value = currentCookie;
       openModal('modal-update-cookie');
+    });
+  }
+
+  const modalImportBtn = document.getElementById('btn-modal-import-browser');
+  if (modalImportBtn) {
+    modalImportBtn.addEventListener('click', () => {
+      importCookieFromBrowser({
+        browserSelectId: 'select-modal-browser',
+        statusDivId: 'modal-browser-import-status',
+        targetInputId: 'quick-cookie-input'
+      });
     });
   }
 
@@ -296,6 +386,57 @@ function initControlButtons() {
   }
 }
 
+async function importCookieFromBrowser({ browserSelectId, statusDivId, targetInputId, onFinish } = {}) {
+  const browserSelect = document.getElementById(browserSelectId);
+  const statusDiv = document.getElementById(statusDivId);
+  const targetInput = document.getElementById(targetInputId);
+  const browser = browserSelect ? browserSelect.value : 'auto';
+
+  if (statusDiv) {
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = 'rgba(59, 130, 246, 0.1)';
+    statusDiv.style.color = '#93c5fd';
+    statusDiv.innerHTML = '⏳ 正在尝试读取本地浏览器 Cookie 并进行连通性验证，请稍候...';
+  }
+
+  try {
+    const res = await fetch('/api/cookie/import_browser', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ browser })
+    });
+    const json = await res.json();
+
+    if (json.code === 200 && json.success) {
+      if (targetInput) {
+        targetInput.value = json.cookie;
+      }
+      if (statusDiv) {
+        statusDiv.style.background = 'rgba(16, 185, 129, 0.12)';
+        statusDiv.style.color = '#10b981';
+        let accountTxt = json.user && json.user.screen_name ? ` (登录账号: ${json.user.screen_name})` : '';
+        statusDiv.innerHTML = `✅ ${json.message}${accountTxt}`;
+      }
+      showToast(`已成功从 ${json.browser} 提取 Cookie！`, 'success');
+      if (typeof onFinish === 'function') onFinish(json);
+    } else {
+      if (statusDiv) {
+        statusDiv.style.background = 'rgba(244, 63, 94, 0.12)';
+        statusDiv.style.color = '#f43f5e';
+        statusDiv.innerHTML = `❌ ${json.message || '提取失败'}`;
+      }
+      showToast(json.message || '提取失败', 'error');
+    }
+  } catch (err) {
+    if (statusDiv) {
+      statusDiv.style.background = 'rgba(244, 63, 94, 0.12)';
+      statusDiv.style.color = '#f43f5e';
+      statusDiv.innerHTML = `❌ 提取异常: ${err}`;
+    }
+    showToast('提取异常: ' + err, 'error');
+  }
+}
+
 async function runCookieCheck() {
   const banner = document.getElementById('cookie-status-banner');
   banner.innerHTML = '正在与微博官方服务器通信验证 Cookie，请稍候...';
@@ -322,6 +463,7 @@ async function fetchUsers() {
     if (json.code === 200) {
       state.users = json.data;
       renderUsersTable(state.users);
+      populateUserFilterDropdown();
     }
   } catch (e) {
     console.error('Failed to fetch users:', e);
@@ -507,23 +649,103 @@ async function fetchConfig() {
   }
 }
 
-function updateWriteModeCardsVisibility() {
-  const cardsMap = {
-    mysql: document.getElementById('card-cfg-mysql'),
-    mongo: document.getElementById('card-cfg-mongo'),
-    sqlite: document.getElementById('card-cfg-sqlite'),
-    post: document.getElementById('card-cfg-post'),
-    markdown: document.getElementById('card-cfg-markdown')
+function getModeDisplayName(mode) {
+  const map = {
+    csv: 'CSV 表格',
+    json: 'JSON 数据',
+    sqlite: 'SQLite 数据库',
+    mysql: 'MySQL 关系数据库',
+    mongo: 'MongoDB 文档数据库',
+    post: 'HTTP POST Webhook',
+    markdown: 'Markdown 归档'
   };
+  return map[mode] || mode;
+}
 
-  document.querySelectorAll('.cfg-writemode-cb').forEach(cb => {
-    const card = cardsMap[cb.value];
-    if (card) {
-      if (cb.checked) {
-        card.classList.add('active');
-      } else {
-        card.classList.remove('active');
-      }
+function updateFormatCardVisual(mode, isEnabled) {
+  const card = document.getElementById('card-cfg-' + mode);
+  const badge = document.getElementById('badge-status-' + mode);
+  if (card) {
+    if (isEnabled) {
+      card.classList.add('is-enabled');
+      card.classList.remove('is-disabled');
+    } else {
+      card.classList.add('is-disabled');
+      card.classList.remove('is-enabled');
+    }
+  }
+  if (badge) {
+    if (isEnabled) {
+      badge.className = 'badge-tag badge-tag-enabled';
+      badge.textContent = '● 已开启';
+    } else {
+      badge.className = 'badge-tag badge-tag-disabled';
+      badge.textContent = '○ 未开启';
+    }
+  }
+}
+
+function validateFormatConfig(mode) {
+  if (mode === 'mysql') {
+    const host = document.getElementById('cfg-mysql-host')?.value.trim();
+    const port = document.getElementById('cfg-mysql-port')?.value.trim();
+    const user = document.getElementById('cfg-mysql-user')?.value.trim();
+    const password = document.getElementById('cfg-mysql-password')?.value;
+
+    if (!host) {
+      return { valid: false, message: '无法开启 MySQL：主机地址 (host) 不能为空', focusId: 'cfg-mysql-host' };
+    }
+    if (!port || isNaN(parseInt(port, 10)) || parseInt(port, 10) <= 0) {
+      return { valid: false, message: '无法开启 MySQL：端口号 (port) 必须为有效数字（如 3306）', focusId: 'cfg-mysql-port' };
+    }
+    if (!user) {
+      return { valid: false, message: '无法开启 MySQL：用户名 (user) 不能为空', focusId: 'cfg-mysql-user' };
+    }
+    if (!password) {
+      return { valid: false, message: '无法开启 MySQL：数据库密码 (password) 不能为空，请先填写密码', focusId: 'cfg-mysql-password' };
+    }
+    return { valid: true };
+  }
+
+  if (mode === 'mongo') {
+    const uri = document.getElementById('cfg-mongo-uri')?.value.trim();
+    if (!uri) {
+      return { valid: false, message: '无法开启 MongoDB：连接 URI (mongodb_URI) 不能为空', focusId: 'cfg-mongo-uri' };
+    }
+    if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
+      return { valid: false, message: '无法开启 MongoDB：URI 格式不正确，必须以 mongodb:// 或 mongodb+srv:// 开头', focusId: 'cfg-mongo-uri' };
+    }
+    return { valid: true };
+  }
+
+  if (mode === 'sqlite') {
+    const path = document.getElementById('cfg-sqlite-path')?.value.trim();
+    if (!path) {
+      return { valid: false, message: '无法开启 SQLite：数据库文件路径 (sqlite_db_path) 不能为空', focusId: 'cfg-sqlite-path' };
+    }
+    return { valid: true };
+  }
+
+  if (mode === 'post') {
+    const url = document.getElementById('cfg-post-url')?.value.trim();
+    if (!url) {
+      return { valid: false, message: '无法开启 HTTP POST：Webhook 接口 URL 不能为空', focusId: 'cfg-post-url' };
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      return { valid: false, message: '无法开启 HTTP POST：接口 URL 必须以 http:// 或 https:// 开头', focusId: 'cfg-post-url' };
+    }
+    return { valid: true };
+  }
+
+  return { valid: true };
+}
+
+function updateWriteModeCardsVisibility() {
+  const modes = ['csv', 'json', 'sqlite', 'mysql', 'mongo', 'post', 'markdown'];
+  modes.forEach(mode => {
+    const sw = document.getElementById('switch-mode-' + mode);
+    if (sw) {
+      updateFormatCardVisual(mode, sw.checked);
     }
   });
 }
@@ -558,17 +780,21 @@ function populateConfigForm(cfg) {
 
   // Folder name mapping (download_folder_name)
   const df = cfg.download_folder_name || {};
-  document.getElementById('cfg-df-orig-img').value = df.original_image_folder || '原创微博图片';
-  document.getElementById('cfg-df-retweet-img').value = df.retweet_image_folder || '转发微博图片';
-  document.getElementById('cfg-df-orig-video').value = df.original_video_folder || '原创微博视频';
-  document.getElementById('cfg-df-retweet-video').value = df.retweet_video_folder || '转发微博视频';
-  document.getElementById('cfg-df-orig-livephoto').value = df.original_live_photo_folder || '原创微博Live Photo视频';
-  document.getElementById('cfg-df-retweet-livephoto').value = df.retweet_live_photo_folder || '转发微博Live Photo视频';
+  document.getElementById('cfg-df-orig-img').value = df.original_image_folder || 'img';
+  document.getElementById('cfg-df-retweet-img').value = df.retweet_image_folder || 'img';
+  document.getElementById('cfg-df-orig-video').value = df.original_video_folder || 'video';
+  document.getElementById('cfg-df-retweet-video').value = df.retweet_video_folder || 'video';
+  document.getElementById('cfg-df-orig-livephoto').value = df.original_live_photo_folder || 'live_photo';
+  document.getElementById('cfg-df-retweet-livephoto').value = df.retweet_live_photo_folder || 'live_photo';
 
   // 4. Write mode & outputs
   const writeModes = Array.isArray(cfg.write_mode) ? cfg.write_mode : [];
-  document.querySelectorAll('.cfg-writemode-cb').forEach(cb => {
-    cb.checked = writeModes.includes(cb.value);
+  ['csv', 'json', 'sqlite', 'mysql', 'mongo', 'post', 'markdown'].forEach(mode => {
+    const sw = document.getElementById('switch-mode-' + mode);
+    if (sw) {
+      sw.checked = writeModes.includes(mode);
+      updateFormatCardVisual(mode, sw.checked);
+    }
   });
   document.getElementById('cfg-uid-folder').checked = (cfg.user_id_as_folder_name === 1);
 
@@ -614,10 +840,10 @@ function populateConfigForm(cfg) {
   const mfd = cfg.markdown_file_dir || {};
   document.getElementById('cfg-mfd-orig-img').value = mfd.original_image_dir || 'img';
   document.getElementById('cfg-mfd-retweet-img').value = mfd.retweet_image_dir || 'img';
-  document.getElementById('cfg-mfd-orig-video').value = mfd.original_video_dir || '原创微博视频';
-  document.getElementById('cfg-mfd-retweet-video').value = mfd.retweet_video_dir || '转发微博视频';
-  document.getElementById('cfg-mfd-orig-livephoto').value = mfd.original_live_photo_dir || '原创微博Live Photo视频';
-  document.getElementById('cfg-mfd-retweet-livephoto').value = mfd.retweet_live_photo_dir || '转发微博Live Photo视频';
+  document.getElementById('cfg-mfd-orig-video').value = mfd.original_video_dir || 'video';
+  document.getElementById('cfg-mfd-retweet-video').value = mfd.retweet_video_dir || 'video';
+  document.getElementById('cfg-mfd-orig-livephoto').value = mfd.original_live_photo_dir || 'live_photo';
+  document.getElementById('cfg-mfd-retweet-livephoto').value = mfd.retweet_live_photo_dir || 'live_photo';
 
   // 5. Advanced & Interactions
   document.getElementById('cfg-download-comment').checked = (cfg.download_comment === 1);
@@ -678,18 +904,21 @@ function collectConfigForm() {
   cfg.change_file_time = document.getElementById('cfg-change-file-time').checked ? 1 : 0;
 
   cfg.download_folder_name = {
-    original_image_folder: document.getElementById('cfg-df-orig-img').value.trim() || '原创微博图片',
-    retweet_image_folder: document.getElementById('cfg-df-retweet-img').value.trim() || '转发微博图片',
-    original_video_folder: document.getElementById('cfg-df-orig-video').value.trim() || '原创微博视频',
-    retweet_video_folder: document.getElementById('cfg-df-retweet-video').value.trim() || '转发微博视频',
-    original_live_photo_folder: document.getElementById('cfg-df-orig-livephoto').value.trim() || '原创微博Live Photo视频',
-    retweet_live_photo_folder: document.getElementById('cfg-df-retweet-livephoto').value.trim() || '转发微博Live Photo视频'
+    original_image_folder: document.getElementById('cfg-df-orig-img').value.trim() || 'img',
+    retweet_image_folder: document.getElementById('cfg-df-retweet-img').value.trim() || 'img',
+    original_video_folder: document.getElementById('cfg-df-orig-video').value.trim() || 'video',
+    retweet_video_folder: document.getElementById('cfg-df-retweet-video').value.trim() || 'video',
+    original_live_photo_folder: document.getElementById('cfg-df-orig-livephoto').value.trim() || 'live_photo',
+    retweet_live_photo_folder: document.getElementById('cfg-df-retweet-livephoto').value.trim() || 'live_photo'
   };
 
   // 4. Write mode & Outputs
   const modes = [];
-  document.querySelectorAll('.cfg-writemode-cb:checked').forEach(cb => {
-    modes.push(cb.value);
+  ['csv', 'json', 'sqlite', 'mysql', 'mongo', 'post', 'markdown'].forEach(mode => {
+    const sw = document.getElementById('switch-mode-' + mode);
+    if (sw && sw.checked) {
+      modes.push(mode);
+    }
   });
   cfg.write_mode = modes;
   cfg.user_id_as_folder_name = document.getElementById('cfg-uid-folder').checked ? 1 : 0;
@@ -736,10 +965,10 @@ function collectConfigForm() {
   cfg.markdown_file_dir = {
     original_image_dir: document.getElementById('cfg-mfd-orig-img').value.trim() || 'img',
     retweet_image_dir: document.getElementById('cfg-mfd-retweet-img').value.trim() || 'img',
-    original_video_dir: document.getElementById('cfg-mfd-orig-video').value.trim() || '原创微博视频',
-    retweet_video_dir: document.getElementById('cfg-mfd-retweet-video').value.trim() || '转发微博视频',
-    original_live_photo_dir: document.getElementById('cfg-mfd-orig-livephoto').value.trim() || '原创微博Live Photo视频',
-    retweet_live_photo_dir: document.getElementById('cfg-mfd-retweet-livephoto').value.trim() || '转发微博Live Photo视频'
+    original_video_dir: document.getElementById('cfg-mfd-orig-video').value.trim() || 'video',
+    retweet_video_dir: document.getElementById('cfg-mfd-retweet-video').value.trim() || 'video',
+    original_live_photo_dir: document.getElementById('cfg-mfd-orig-livephoto').value.trim() || 'live_photo',
+    retweet_live_photo_dir: document.getElementById('cfg-mfd-retweet-livephoto').value.trim() || 'live_photo'
   };
 
   // 5. Advanced & Interactions
@@ -817,10 +1046,27 @@ function initConfigCenter() {
   });
 
   // Save config
-  document.getElementById('btn-save-config').addEventListener('click', async () => {
+  async function handleSaveConfig() {
     let payload = {};
-    if (state.configMode === 'form') {
-      payload.parsed = collectConfigForm();
+    if (state.configMode === 'form' || state.currentTab === 'output') {
+      const collected = collectConfigForm();
+      // 校验所有已开启的输出格式配置项是否完整
+      for (const mode of collected.write_mode) {
+        const check = validateFormatConfig(mode);
+        if (!check.valid) {
+          showToast(`保存受阻：已开启的 ${getModeDisplayName(mode)} 配置未完善（${check.message}）`, 'error');
+          if (check.focusId) {
+            const input = document.getElementById(check.focusId);
+            if (input) {
+              input.focus();
+              input.classList.add('input-error-pulse');
+              setTimeout(() => input.classList.remove('input-error-pulse'), 1500);
+            }
+          }
+          return;
+        }
+      }
+      payload.parsed = collected;
     } else {
       payload.raw = document.getElementById('raw-json-editor').value;
     }
@@ -841,12 +1087,39 @@ function initConfigCenter() {
     } catch (e) {
       showToast('保存配置出错: ' + e, 'error');
     }
+  }
+
+  ['btn-save-config', 'btn-save-output-config', 'btn-save-output-config-bottom'].forEach(btnId => {
+    const btn = document.getElementById(btnId);
+    if (btn) btn.addEventListener('click', handleSaveConfig);
   });
 
-  // Listen to write_mode checkboxes to dynamically expand / collapse config cards
-  document.querySelectorAll('.cfg-writemode-cb').forEach(cb => {
-    cb.addEventListener('change', () => {
-      updateWriteModeCardsVisibility();
+  // Listen to format toggle switches and validate before enabling
+  document.querySelectorAll('.cfg-mode-switch').forEach(sw => {
+    sw.addEventListener('change', () => {
+      const mode = sw.getAttribute('data-mode');
+      if (sw.checked) {
+        const check = validateFormatConfig(mode);
+        if (!check.valid) {
+          // 校验不通过：阻止开启并提示具体缺失项
+          sw.checked = false;
+          updateFormatCardVisual(mode, false);
+          showToast(check.message, 'error');
+          if (check.focusId) {
+            const input = document.getElementById(check.focusId);
+            if (input) {
+              input.focus();
+              input.classList.add('input-error-pulse');
+              setTimeout(() => input.classList.remove('input-error-pulse'), 1500);
+            }
+          }
+          return;
+        }
+        updateFormatCardVisual(mode, true);
+        showToast(`已开启 ${getModeDisplayName(mode)} 输出`, 'success');
+      } else {
+        updateFormatCardVisual(mode, false);
+      }
     });
   });
 
@@ -862,6 +1135,24 @@ function initConfigCenter() {
         pwdInput.type = 'password';
         togglePwdBtn.textContent = '👁️';
       }
+    });
+  }
+
+  // Import Cookie from Browser in settings
+  const settingsImportBtn = document.getElementById('btn-settings-import-browser');
+  if (settingsImportBtn) {
+    settingsImportBtn.addEventListener('click', () => {
+      importCookieFromBrowser({
+        browserSelectId: 'select-settings-browser',
+        statusDivId: 'settings-browser-import-status',
+        targetInputId: 'cfg-cookie',
+        onFinish: (data) => {
+          const resDiv = document.getElementById('settings-cookie-test-result');
+          if (resDiv && data.valid) {
+            resDiv.innerHTML = `<span style="color: var(--accent-emerald);">✅ ${data.message}</span>`;
+          }
+        }
+      });
     });
   }
 
@@ -886,6 +1177,139 @@ function initConfigCenter() {
       resultDiv.innerHTML = `<span style="color: var(--accent-rose);">连接失败: ${e}</span>`;
     }
   });
+
+  // -----------------------------------------------------------
+  // Connectivity Tests for MySQL, MongoDB, and Webhook
+  // -----------------------------------------------------------
+  // 1. MySQL Test
+  const btnTestMysql = document.getElementById('btn-test-mysql');
+  if (btnTestMysql) {
+    btnTestMysql.addEventListener('click', async () => {
+      const host = document.getElementById('cfg-mysql-host').value.trim();
+      const port = parseInt(document.getElementById('cfg-mysql-port').value.trim()) || 3306;
+      const user = document.getElementById('cfg-mysql-user').value.trim();
+      const password = document.getElementById('cfg-mysql-password').value;
+      const charset = document.getElementById('cfg-mysql-charset').value.trim() || 'utf8mb4';
+      const resultDiv = document.getElementById('test-result-mysql');
+
+      if (!host) {
+        showToast('请先填写 MySQL 主机地址', 'error');
+        document.getElementById('cfg-mysql-host').focus();
+        return;
+      }
+      if (!user) {
+        showToast('请先填写 MySQL 用户名', 'error');
+        document.getElementById('cfg-mysql-user').focus();
+        return;
+      }
+
+      btnTestMysql.disabled = true;
+      btnTestMysql.innerHTML = '<span>⏳ 正在连接测试...</span>';
+      resultDiv.innerHTML = '<span style="color: var(--text-dim);">正在尝试连接 MySQL 数据库...</span>';
+
+      try {
+        const res = await fetch('/api/test/mysql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ host, port, user, password, charset })
+        });
+        const json = await res.json();
+        if (json.valid) {
+          resultDiv.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 500;">✅ ${json.message}</span>`;
+          showToast('MySQL 连通性测试通过', 'success');
+        } else {
+          resultDiv.innerHTML = `<span style="color: var(--accent-rose); font-weight: 500;">❌ ${json.message}</span>`;
+          showToast(json.message, 'error');
+        }
+      } catch (err) {
+        resultDiv.innerHTML = `<span style="color: var(--accent-rose);">❌ 测试请求异常: ${err}</span>`;
+      } finally {
+        btnTestMysql.disabled = false;
+        btnTestMysql.innerHTML = '<span>⚡ 测试 MySQL 连通性</span>';
+      }
+    });
+  }
+
+  // 2. MongoDB Test
+  const btnTestMongo = document.getElementById('btn-test-mongo');
+  if (btnTestMongo) {
+    btnTestMongo.addEventListener('click', async () => {
+      const uri = document.getElementById('cfg-mongo-uri').value.trim();
+      const resultDiv = document.getElementById('test-result-mongo');
+
+      if (!uri) {
+        showToast('请先填写 MongoDB 连接 URI', 'error');
+        document.getElementById('cfg-mongo-uri').focus();
+        return;
+      }
+
+      btnTestMongo.disabled = true;
+      btnTestMongo.innerHTML = '<span>⏳ 正在连接测试...</span>';
+      resultDiv.innerHTML = '<span style="color: var(--text-dim);">正在尝试连接 MongoDB 数据库...</span>';
+
+      try {
+        const res = await fetch('/api/test/mongodb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uri })
+        });
+        const json = await res.json();
+        if (json.valid) {
+          resultDiv.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 500;">✅ ${json.message}</span>`;
+          showToast('MongoDB 连通性测试通过', 'success');
+        } else {
+          resultDiv.innerHTML = `<span style="color: var(--accent-rose); font-weight: 500;">❌ ${json.message}</span>`;
+          showToast(json.message, 'error');
+        }
+      } catch (err) {
+        resultDiv.innerHTML = `<span style="color: var(--accent-rose);">❌ 测试请求异常: ${err}</span>`;
+      } finally {
+        btnTestMongo.disabled = false;
+        btnTestMongo.innerHTML = '<span>⚡ 测试 MongoDB 连通性</span>';
+      }
+    });
+  }
+
+  // 3. Webhook (HTTP POST) Test
+  const btnTestPost = document.getElementById('btn-test-post');
+  if (btnTestPost) {
+    btnTestPost.addEventListener('click', async () => {
+      const url = document.getElementById('cfg-post-url').value.trim();
+      const token = document.getElementById('cfg-post-token').value.trim();
+      const resultDiv = document.getElementById('test-result-post');
+
+      if (!url) {
+        showToast('请先填写 Webhook 接收接口 URL', 'error');
+        document.getElementById('cfg-post-url').focus();
+        return;
+      }
+
+      btnTestPost.disabled = true;
+      btnTestPost.innerHTML = '<span>⏳ 正在发送请求...</span>';
+      resultDiv.innerHTML = '<span style="color: var(--text-dim);">正在向 Webhook 地址发送检测请求...</span>';
+
+      try {
+        const res = await fetch('/api/test/webhook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, token })
+        });
+        const json = await res.json();
+        if (json.valid) {
+          resultDiv.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 500;">✅ ${json.message}</span>`;
+          showToast('Webhook 连通性测试成功', 'success');
+        } else {
+          resultDiv.innerHTML = `<span style="color: var(--accent-rose); font-weight: 500;">❌ ${json.message}</span>`;
+          showToast(json.message, 'error');
+        }
+      } catch (err) {
+        resultDiv.innerHTML = `<span style="color: var(--accent-rose);">❌ 测试请求异常: ${err}</span>`;
+      } finally {
+        btnTestPost.disabled = false;
+        btnTestPost.innerHTML = '<span>⚡ 测试 Webhook 连通性</span>';
+      }
+    });
+  }
 }
 
 // Live Log Streamer
@@ -964,17 +1388,73 @@ function initLogStreamer() {
 
 // Data Explorer
 async function fetchData() {
-  const kw = document.getElementById('data-search-keyword').value.trim();
-  const url = `/api/data/weibos?page=${state.dataPage}&page_size=${state.dataPageSize}${kw ? '&keyword=' + encodeURIComponent(kw) : ''}`;
+  const userSelect = document.getElementById('data-filter-user');
+  const userId = userSelect ? userSelect.value.trim() : '';
+
+  const startInput = document.getElementById('data-filter-start-date');
+  const startDate = startInput ? startInput.value.trim() : '';
+
+  const endInput = document.getElementById('data-filter-end-date');
+  const endDate = endInput ? endInput.value.trim() : '';
+
+  const kwInput = document.getElementById('data-search-keyword');
+  const kw = kwInput ? kwInput.value.trim() : '';
+
+  let url = `/api/data/weibos?page=${state.dataPage}&page_size=${state.dataPageSize}`;
+  if (userId) url += `&user_id=${encodeURIComponent(userId)}`;
+  if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
+  if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
+  if (kw) url += `&keyword=${encodeURIComponent(kw)}`;
 
   try {
     const res = await fetch(url);
     const json = await res.json();
     if (json.code === 200) {
+      if (json.data && Array.isArray(json.data.available_users)) {
+        populateUserFilterDropdown(json.data.available_users);
+      }
       renderDataTable(json.data);
     }
   } catch (e) {
     console.error('Fetch data error:', e);
+  }
+}
+
+function populateUserFilterDropdown(dbUsers = []) {
+  const select = document.getElementById('data-filter-user');
+  if (!select) return;
+
+  const currentVal = select.value;
+  const userMap = new Map();
+
+  // 1. Add users found in SQLite database
+  if (Array.isArray(dbUsers)) {
+    dbUsers.forEach(u => {
+      if (u.user_id) {
+        userMap.set(String(u.user_id), u.screen_name || u.user_id);
+      }
+    });
+  }
+
+  // 2. Also merge configured target users
+  if (Array.isArray(state.users)) {
+    state.users.forEach(u => {
+      if (u.id && !userMap.has(String(u.id))) {
+        userMap.set(String(u.id), u.screen_name || u.id);
+      }
+    });
+  }
+
+  // Build options
+  let optionsHtml = '<option value="">全部博主</option>';
+  userMap.forEach((name, uid) => {
+    const displayName = (name && name !== uid) ? `${name} (${uid})` : uid;
+    optionsHtml += `<option value="${escapeHtml(uid)}">${escapeHtml(displayName)}</option>`;
+  });
+
+  select.innerHTML = optionsHtml;
+  if (currentVal && userMap.has(currentVal)) {
+    select.value = currentVal;
   }
 }
 
@@ -984,14 +1464,15 @@ function renderDataTable(data) {
   const pageIndicator = document.getElementById('data-page-indicator');
 
   if (!data || !data.exists || !data.items || data.items.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 40px;">暂无匹配的微博数据（请检查是否在配置中开启了 sqlite 输出并执行过爬取）</td></tr>';
-    totalLabel.textContent = '共 0 条记录';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 40px;">暂无匹配的微博数据（请检查筛选条件，或在配置中开启 sqlite 输出并执行过爬取）</td></tr>';
+    totalLabel.textContent = '共 0 条数据';
     pageIndicator.textContent = `第 1 页`;
     return;
   }
 
-  totalLabel.textContent = `共 ${data.total} 条记录`;
-  pageIndicator.textContent = `第 ${data.page} 页 / 共 ${Math.ceil(data.total / data.page_size)} 页`;
+  totalLabel.textContent = `共 ${data.total} 条数据`;
+  const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+  pageIndicator.textContent = `第 ${data.page} 页 / 共 ${totalPages} 页`;
 
   tbody.innerHTML = data.items.map(item => {
     const link = item.bid ? `https://m.weibo.cn/status/${item.bid}` : `https://m.weibo.cn/detail/${item.id}`;
@@ -999,18 +1480,18 @@ function renderDataTable(data) {
       <tr>
         <td><strong>${escapeHtml(item.screen_name || item.user_id)}</strong></td>
         <td>
-          <div style="max-height: 80px; overflow-y: auto; font-size: 0.88rem;">
+          <div style="max-height: 80px; overflow-y: auto; font-size: 0.88rem; line-height: 1.5;">
             ${escapeHtml(item.text || '')}
           </div>
         </td>
-        <td><span style="font-size: 0.8rem; color: var(--text-dim);">${escapeHtml(item.created_at || '')}</span></td>
+        <td><span style="font-size: 0.8rem; color: var(--text-dim); white-space: nowrap;">${escapeHtml(item.created_at || '')}</span></td>
         <td>
-          <span style="font-size: 0.82rem; color: var(--text-muted);">
+          <span style="font-size: 0.82rem; color: var(--text-muted); white-space: nowrap;">
             👍 ${item.attitudes_count || 0} &nbsp;|&nbsp; 💬 ${item.comments_count || 0} &nbsp;|&nbsp; 🔁 ${item.reposts_count || 0}
           </span>
         </td>
         <td style="text-align: right;">
-          <a href="${link}" target="_blank" class="btn btn-secondary btn-sm" title="跳转微博">查看</a>
+          <a href="${link}" target="_blank" class="btn btn-secondary btn-sm" title="跳转微博原文">查看</a>
         </td>
       </tr>
     `;
@@ -1018,18 +1499,66 @@ function renderDataTable(data) {
 }
 
 function initDataExplorer() {
-  document.getElementById('btn-search-data').addEventListener('click', () => {
-    state.dataPage = 1;
-    fetchData();
-  });
+  const btnSearch = document.getElementById('btn-search-data');
+  const btnReset = document.getElementById('btn-reset-data');
+  const kwInput = document.getElementById('data-search-keyword');
+  const userSelect = document.getElementById('data-filter-user');
+  const startInput = document.getElementById('data-filter-start-date');
+  const endInput = document.getElementById('data-filter-end-date');
 
-  document.getElementById('data-search-keyword').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  // Trigger search on button click
+  if (btnSearch) {
+    btnSearch.addEventListener('click', () => {
       state.dataPage = 1;
       fetchData();
-    }
-  });
+    });
+  }
 
+  // Trigger search on reset
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      if (userSelect) userSelect.value = '';
+      if (startInput) startInput.value = '';
+      if (endInput) endInput.value = '';
+      if (kwInput) kwInput.value = '';
+      state.dataPage = 1;
+      fetchData();
+    });
+  }
+
+  // Auto trigger on dropdown / date change
+  if (userSelect) {
+    userSelect.addEventListener('change', () => {
+      state.dataPage = 1;
+      fetchData();
+    });
+  }
+
+  if (startInput) {
+    startInput.addEventListener('change', () => {
+      state.dataPage = 1;
+      fetchData();
+    });
+  }
+
+  if (endInput) {
+    endInput.addEventListener('change', () => {
+      state.dataPage = 1;
+      fetchData();
+    });
+  }
+
+  // Trigger search on Enter in keyword input
+  if (kwInput) {
+    kwInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        state.dataPage = 1;
+        fetchData();
+      }
+    });
+  }
+
+  // Pagination
   document.getElementById('btn-data-prev').addEventListener('click', () => {
     if (state.dataPage > 1) {
       state.dataPage--;
@@ -1079,3 +1608,42 @@ function initModals() {
     });
   });
 }
+
+// RESTful API Documentation Center
+function initApiDocs() {
+  const catButtons = document.querySelectorAll('.api-cat-btn');
+  const searchInput = document.getElementById('api-search-input');
+  const cards = document.querySelectorAll('.api-card');
+
+  function filterCards() {
+    const activeBtn = document.querySelector('.api-cat-btn.active');
+    const activeCat = activeBtn ? activeBtn.getAttribute('data-cat') : 'all';
+    const kw = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+    cards.forEach(card => {
+      const cardCat = card.getAttribute('data-cat');
+      const cardSearch = (card.getAttribute('data-search') || '').toLowerCase();
+      const matchCat = (activeCat === 'all' || cardCat === activeCat);
+      const matchKw = (!kw || cardSearch.includes(kw));
+
+      if (matchCat && matchKw) {
+        card.style.display = 'block';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  }
+
+  catButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      catButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      filterCards();
+    });
+  });
+
+  if (searchInput) {
+    searchInput.addEventListener('input', filterCards);
+  }
+}
+
