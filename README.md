@@ -1,5 +1,9 @@
 # Weibo Crawler
 
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-red.svg)](https://atorber.github.io/weibo-crawler/)
+
+> 📖 **官方在线文档站点**：[https://atorber.github.io/weibo-crawler/](https://atorber.github.io/weibo-crawler/)
+
 - [Weibo Crawler](#weibo-crawler)
   - [功能](#功能)
   - [输出](#输出)
