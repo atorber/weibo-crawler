@@ -195,6 +195,40 @@
             </div>
           </div>
 
+          <!-- Continuous Monitor / Auto-Schedule Bar -->
+          <div style="margin-top: 16px; padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.22); background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span style="font-size: 1.15rem;">⏰</span>
+              <div>
+                <div style="font-size: 0.92rem; font-weight: 600; color: #93c5fd; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <span>持续监听模式（定时增量巡检新微博）</span>
+                  <span id="dash-schedule-status" style="font-size: 0.76rem; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: rgba(148, 163, 184, 0.15); color: var(--text-dim);">⚪ 单次运行（爬完即停）</span>
+                </div>
+                <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 3px;">
+                  开启后每轮爬完自动记录最新微博时间，按设定间隔循环拉起下一轮增量抓取，实现 7×24 小时动态监控
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 0.8rem; color: var(--text-dim);">巡检间隔:</span>
+                <select class="form-control form-control-sm" id="dash-schedule-interval" style="width: auto; padding: 4px 10px; font-size: 0.82rem;">
+                  <option value="5">每 5 分钟</option>
+                  <option value="10">每 10 分钟</option>
+                  <option value="15">每 15 分钟</option>
+                  <option value="30" selected>每 30 分钟 (推荐)</option>
+                  <option value="60">每 1 小时</option>
+                  <option value="120">每 2 小时</option>
+                  <option value="360">每 6 小时</option>
+                </select>
+              </div>
+              <label class="toggle-switch" title="开启/关闭持续监听模式">
+                <input type="checkbox" id="dash-schedule-enabled">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
           <div class="control-actions-help">
             <div class="help-item">
               <span class="help-badge badge-primary">▶ 启动</span>
@@ -351,6 +385,32 @@
                   <input type="number" class="form-control" id="cfg-page-count" min="5" max="100" value="20">
                 </div>
               </div>
+
+              <!-- Continuous Monitor / Scheduled Crawl Section in Settings -->
+              <div class="content-box" style="margin-top: 8px; padding: 16px 18px; border: 1px solid rgba(59, 130, 246, 0.22); background: rgba(15, 23, 42, 0.45);">
+                <div class="switch-wrap" style="margin-bottom: 12px;">
+                  <div class="switch-label-wrap">
+                    <span class="switch-label-title" style="color: #93c5fd;">⏰ 开启持续监听模式 (schedule_config.enabled)</span>
+                    <span class="switch-label-subtitle">开启后每轮抓取完成自动等待指定间隔，再自动拉起下一轮增量巡检（仅拉取最新发布的微博）</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="cfg-schedule-enabled">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">持续监听轮询间隔 (schedule_config.interval_minutes，单位：分钟)</label>
+                  <select class="form-control" id="cfg-schedule-interval">
+                    <option value="5">每 5 分钟自动巡检一次</option>
+                    <option value="10">每 10 分钟自动巡检一次</option>
+                    <option value="15">每 15 分钟自动巡检一次</option>
+                    <option value="30" selected>每 30 分钟自动巡检一次 (推荐)</option>
+                    <option value="60">每 60 分钟 (1 小时) 自动巡检一次</option>
+                    <option value="120">每 120 分钟 (2 小时) 自动巡检一次</option>
+                    <option value="360">每 360 分钟 (6 小时) 自动巡检一次</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
             <!-- Subtab 2: Cookie -->
@@ -388,6 +448,74 @@
                 </div>
                 <div id="settings-browser-import-status"
                   style="display: none; margin-top: 10px; font-size: 0.82rem; padding: 6px 10px; border-radius: 4px;">
+                </div>
+              </div>
+
+              <!-- Cookie Auto-Update & Hot-Reload Card -->
+              <div class="content-box" style="margin-bottom: 18px; padding: 16px 18px; border: 1px solid rgba(59, 130, 246, 0.22); background: rgba(15, 23, 42, 0.45);">
+                <div class="switch-wrap" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
+                  <div class="switch-label-wrap">
+                    <span class="switch-label-title" style="color: #93c5fd;">🔄 开启浏览器 Cookie 自动更新与失效热恢复 (cookie_auto_config.enabled)</span>
+                    <span class="switch-label-subtitle">开启后无需手动提取，支持爬虫遇到 403/认证失效时自动从本地浏览器提取最新 Cookie 并无缝重试，以及后台定时同步</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="cfg-cookie-auto-enabled">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="switch-wrap" style="margin-bottom: 10px;">
+                  <div class="switch-label-wrap">
+                    <span class="switch-label-title">⚡ 爬虫运行中遇到 403/432/认证失效时自动热更新并重试 (refresh_on_expire)</span>
+                    <span class="switch-label-subtitle">抓取中途若触发认证拦截或登录态过期，自动重提浏览器 Cookie 热替换 Session，不中断当前任务</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="cfg-cookie-auto-expire" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="switch-wrap" style="margin-bottom: 14px;">
+                  <div class="switch-label-wrap">
+                    <span class="switch-label-title">🛡️ 每次启动爬虫任务前自动校验并刷新失效 Cookie (check_before_start)</span>
+                    <span class="switch-label-subtitle">点击启动爬虫前自动探针检测，若当前 Cookie 已失效则先从浏览器提取最新凭证再启动</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="cfg-cookie-auto-before-start" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="form-grid" style="margin-top: 8px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">自动提取源浏览器 (browser)</label>
+                    <select class="form-control" id="cfg-cookie-auto-browser">
+                      <option value="auto">自动探测已登录浏览器 (推荐)</option>
+                      <option value="chrome">Google Chrome</option>
+                      <option value="edge">Microsoft Edge</option>
+                      <option value="firefox">Mozilla Firefox</option>
+                      <option value="safari">Apple Safari</option>
+                      <option value="brave">Brave</option>
+                      <option value="arc">Arc</option>
+                      <option value="opera">Opera</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">后台周期性同步间隔 (interval_minutes)</label>
+                    <select class="form-control" id="cfg-cookie-auto-interval">
+                      <option value="0">仅在失效 / 启动前自动更新 (不定时轮询)</option>
+                      <option value="30">每 30 分钟自动同步一次</option>
+                      <option value="60">每 1 小时自动同步一次</option>
+                      <option value="180">每 3 小时自动同步一次</option>
+                      <option value="360" selected>每 6 小时自动同步一次 (推荐)</option>
+                      <option value="720">每 12 小时自动同步一次</option>
+                      <option value="1440">每 24 小时自动同步一次</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div id="settings-cookie-auto-status" style="margin-top: 12px; font-size: 0.8rem; color: var(--text-dim); padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+                  自动更新状态：正在读取...
                 </div>
               </div>
 
@@ -1600,8 +1728,34 @@
         <div class="form-desc" style="margin-bottom: 8px; line-height: 1.5;">
           或手动粘贴在 weibo.com 登录后的完整 Cookie 字符串：
         </div>
-        <textarea class="form-control" id="quick-cookie-input" rows="5"
+        <textarea class="form-control" id="quick-cookie-input" rows="4"
           placeholder="SUB=...; SUBP=...; _T_WM=..."></textarea>
+
+        <!-- Quick Auto-Update Policy inside Modal -->
+        <div style="margin-top: 14px; padding: 12px 14px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.2); background: rgba(15, 23, 42, 0.4);">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+            <div>
+              <div style="font-size: 0.85rem; font-weight: 600; color: #93c5fd;">🔄 开启浏览器 Cookie 自动更新与失效热恢复</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">爬虫遇到 403/过期时自动重提浏览器 Cookie 热替换，无需中断任务</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="modal-cookie-auto-enabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+            <span style="font-size: 0.78rem; color: var(--text-dim);">定时同步周期：</span>
+            <select class="form-control form-control-sm" id="modal-cookie-auto-interval" style="width: auto; padding: 4px 10px; font-size: 0.8rem;">
+              <option value="0">仅在失效 / 启动前自动更新</option>
+              <option value="30">每 30 分钟</option>
+              <option value="60">每 1 小时</option>
+              <option value="180">每 3 小时</option>
+              <option value="360" selected>每 6 小时 (推荐)</option>
+              <option value="720">每 12 小时</option>
+              <option value="1440">每 24 小时</option>
+            </select>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary modal-close" data-modal="modal-update-cookie">取消</button>
@@ -1613,7 +1767,7 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/js/console.js?v=3"></script>
+  <script src="/static/js/console.js?v=5"></script>
 </body>
 
 </html>

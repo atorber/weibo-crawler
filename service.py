@@ -36,6 +36,13 @@ from flask import (
 import json5
 import requests
 
+from util.browser_cookie import (
+    DEFAULT_COOKIE_AUTO_CONFIG,
+    extract_and_save_cookie,
+    extract_browser_cookies,
+    get_cookie_auto_config,
+    verify_cookie_string,
+)
 from weibo import get_config as get_weibo_config, handle_config_renaming
 
 BASE_DIR = os.path.split(os.path.realpath(__file__))[0] + os.sep
@@ -81,6 +88,27 @@ class ProcessController:
         with self.lock:
             if self.is_running():
                 return False, "爬虫服务当前正在运行中，请勿重复启动"
+
+            # 启动前检查 Cookie 有效性，若开启了自动更新且当前 Cookie 已失效，则自动从浏览器提取刷新
+            try:
+                _, parsed_cfg, _ = read_raw_config()
+                auto_cfg = get_cookie_auto_config(parsed_cfg)
+                if auto_cfg.get("enabled") and (
+                    auto_cfg.get("check_before_start", True)
+                    or auto_cfg.get("refresh_on_expire", True)
+                ):
+                    cur_cookie = parsed_cfg.get("cookie", "")
+                    chk = verify_cookie_string(cur_cookie)
+                    if not chk.get("valid") or not chk.get("personal_login"):
+                        self.log(
+                            "--- [Cookie 自动更新] 启动前检测到当前 Cookie 未登录或已失效，正在尝试从浏览器自动提取更新 ---"
+                        )
+                        cookie_updater.sync_now(
+                            reason="启动前检测到失效自动更新",
+                            only_if_expired=False,
+                        )
+            except Exception as e:
+                logger.debug(f"Pre-start cookie check error: {e}")
 
             # Reset state
             self.status = "RUNNING"
@@ -198,6 +226,12 @@ class ProcessController:
         # e.g., count increments
         if "共采集到" in line or "爬取完成" in line:
             self.crawled_count += 1
+        # Detect crawler hot cookie refresh events
+        if "[Cookie 自动更新] 热更新成功" in line:
+            try:
+                cookie_updater.record_runtime_refresh(line)
+            except Exception:
+                pass
 
     def log(self, text):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -273,6 +307,229 @@ class ProcessController:
 
 
 controller = ProcessController()
+
+
+class CookieAutoUpdater:
+    """Background daemon that periodically syncs browser cookies or auto-updates on expiration."""
+
+    def __init__(self):
+        self.last_sync_time = None
+        self.last_sync_ts = time.time()
+        self.last_sync_status = "IDLE"  # IDLE, SUCCESS, FAILED
+        self.last_sync_message = "尚未触发自动同步"
+        self.last_browser = None
+        self.sync_count = 0
+        self.lock = threading.Lock()
+        self.worker_thread = threading.Thread(
+            target=self._worker_loop, daemon=True
+        )
+        self.worker_thread.start()
+
+    def record_runtime_refresh(self, log_line):
+        with self.lock:
+            self.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.last_sync_ts = time.time()
+            self.last_sync_status = "SUCCESS"
+            self.last_sync_message = f"爬虫运行中触发热更新: {log_line}"
+            self.sync_count += 1
+
+    def sync_now(self, reason="周期同步", only_if_expired=False):
+        with self.lock:
+            try:
+                _, parsed, _ = read_raw_config()
+                auto_cfg = get_cookie_auto_config(parsed)
+                browser = auto_cfg.get("browser", "auto")
+
+                if only_if_expired:
+                    cur_cookie = parsed.get("cookie", "")
+                    chk = verify_cookie_string(cur_cookie)
+                    if chk.get("valid") and chk.get("personal_login"):
+                        self.last_sync_time = datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                        self.last_sync_ts = time.time()
+                        self.last_sync_status = "SUCCESS"
+                        self.last_sync_message = (
+                            f"[{reason}] 巡检通过，当前 Cookie 有效 ({chk.get('message', '')})"
+                        )
+                        return {
+                            "success": True,
+                            "synced": False,
+                            "valid": True,
+                            "message": self.last_sync_message,
+                        }
+
+                res = extract_and_save_cookie(browser_name=browser)
+                self.last_sync_time = res.get(
+                    "timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+                self.last_sync_ts = time.time()
+                self.last_browser = res.get("browser")
+
+                if res.get("success") and res.get("valid"):
+                    self.last_sync_status = "SUCCESS"
+                    self.sync_count += 1
+                    self.last_sync_message = (
+                        f"[{reason}] {res.get('message', '同步成功')}"
+                    )
+                    controller.log(
+                        f"🔄 [Cookie 自动更新] {self.last_sync_message}"
+                    )
+                else:
+                    self.last_sync_status = "FAILED"
+                    self.last_sync_message = (
+                        f"[{reason}] 提取或验证未通过: {res.get('message', '')}"
+                    )
+                    controller.log(
+                        f"⚠️ [Cookie 自动更新] {self.last_sync_message}"
+                    )
+
+                return res
+            except Exception as e:
+                self.last_sync_time = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                self.last_sync_ts = time.time()
+                self.last_sync_status = "FAILED"
+                self.last_sync_message = f"[{reason}] 自动更新异常: {e}"
+                return {
+                    "success": False,
+                    "valid": False,
+                    "message": self.last_sync_message,
+                }
+
+    def _worker_loop(self):
+        while True:
+            time.sleep(20)
+            try:
+                _, parsed, _ = read_raw_config()
+                auto_cfg = get_cookie_auto_config(parsed)
+                if not auto_cfg.get("enabled"):
+                    continue
+
+                interval_min = auto_cfg.get("interval_minutes", 0)
+                if interval_min > 0:
+                    elapsed = time.time() - self.last_sync_ts
+                    if elapsed >= interval_min * 60:
+                        self.sync_now(
+                            reason=f"定时周期更新 (每 {interval_min} 分钟)",
+                            only_if_expired=False,
+                        )
+            except Exception as e:
+                logger.debug(f"CookieAutoUpdater loop error: {e}")
+
+    def get_status(self):
+        _, parsed, _ = read_raw_config()
+        auto_cfg = get_cookie_auto_config(parsed)
+        next_sync_in = None
+        if auto_cfg.get("enabled") and auto_cfg.get("interval_minutes", 0) > 0:
+            rem = int(
+                auto_cfg["interval_minutes"] * 60
+                - (time.time() - self.last_sync_ts)
+            )
+            next_sync_in = max(0, rem)
+
+        return {
+            "last_sync_time": self.last_sync_time,
+            "last_sync_status": self.last_sync_status,
+            "last_sync_message": self.last_sync_message,
+            "last_browser": self.last_browser,
+            "sync_count": self.sync_count,
+            "next_sync_in_seconds": next_sync_in,
+        }
+
+
+cookie_updater = CookieAutoUpdater()
+
+
+def get_schedule_config(parsed_config=None):
+    """Returns normalized schedule_config dictionary for continuous monitoring."""
+    if parsed_config is None:
+        _, parsed_config, _ = read_raw_config()
+    raw_sched = parsed_config.get("schedule_config")
+    if not isinstance(raw_sched, dict):
+        raw_sched = {}
+    enabled = bool(raw_sched.get("enabled", False))
+    try:
+        interval_minutes = max(1, int(raw_sched.get("interval_minutes", 30)))
+    except (ValueError, TypeError):
+        interval_minutes = 30
+    return {
+        "enabled": enabled,
+        "interval_minutes": interval_minutes,
+    }
+
+
+class CrawlScheduler:
+    """Background daemon that continuously monitors target bloggers by scheduling incremental crawls."""
+
+    def __init__(self):
+        self.last_reference_ts = time.time()
+        self.last_trigger_time = None
+        self.run_count = 0
+        self.lock = threading.Lock()
+        self.worker_thread = threading.Thread(
+            target=self._worker_loop, daemon=True
+        )
+        self.worker_thread.start()
+
+    def reset_timer(self):
+        with self.lock:
+            self.last_reference_ts = time.time()
+
+    def _worker_loop(self):
+        while True:
+            time.sleep(5)
+            try:
+                _, parsed, _ = read_raw_config()
+                sched_cfg = get_schedule_config(parsed)
+                if not sched_cfg.get("enabled"):
+                    self.last_reference_ts = time.time()
+                    continue
+
+                # If crawler is currently running, reset reference timestamp so interval starts after completion
+                if controller.is_running():
+                    self.last_reference_ts = time.time()
+                    continue
+
+                interval_sec = sched_cfg["interval_minutes"] * 60
+                elapsed = time.time() - self.last_reference_ts
+                if elapsed >= interval_sec:
+                    with self.lock:
+                        self.last_reference_ts = time.time()
+                        self.run_count += 1
+                        self.last_trigger_time = datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                    controller.log(
+                        f"⏰ [持续监听调度] 已到达定时巡检周期 (每 {sched_cfg['interval_minutes']} 分钟)，自动启动第 {self.run_count} 轮增量抓取..."
+                    )
+                    controller.start()
+            except Exception as e:
+                logger.debug(f"CrawlScheduler loop error: {e}")
+
+    def get_status(self):
+        _, parsed, _ = read_raw_config()
+        sched_cfg = get_schedule_config(parsed)
+        running = controller.is_running()
+        next_run_in = None
+        if sched_cfg.get("enabled") and not running:
+            rem = int(
+                sched_cfg["interval_minutes"] * 60
+                - (time.time() - self.last_reference_ts)
+            )
+            next_run_in = max(0, rem)
+
+        return {
+            "enabled": sched_cfg["enabled"],
+            "interval_minutes": sched_cfg["interval_minutes"],
+            "last_trigger_time": self.last_trigger_time,
+            "run_count": self.run_count,
+            "next_run_in_seconds": next_run_in,
+        }
+
+
+crawl_scheduler = CrawlScheduler()
 
 # Configuration helper functions
 def read_raw_config():
@@ -526,7 +783,75 @@ def api_status():
         "db_connected": data_info.get("exists", False),
         "log_entries_count": len(controller.log_buffer),
     }
+    status_info["schedule"] = crawl_scheduler.get_status()
     return jsonify({"code": 200, "data": status_info})
+
+
+@app.route("/api/schedule", methods=["GET", "POST"])
+def api_schedule():
+    if request.method == "GET":
+        _, parsed, _ = read_raw_config()
+        return jsonify(
+            {
+                "code": 200,
+                "config": get_schedule_config(parsed),
+                "status": crawl_scheduler.get_status(),
+            }
+        )
+
+    req = request.get_json(silent=True) or {}
+    _, parsed, _ = read_raw_config()
+    cur_sched = get_schedule_config(parsed)
+
+    if "enabled" in req:
+        cur_sched["enabled"] = bool(req["enabled"])
+    if "interval_minutes" in req:
+        try:
+            cur_sched["interval_minutes"] = max(
+                1, int(req["interval_minutes"])
+            )
+        except (ValueError, TypeError):
+            pass
+
+    parsed["schedule_config"] = cur_sched
+    try:
+        new_raw = json.dumps(parsed, indent=4, ensure_ascii=False)
+        save_config_content(new_raw)
+    except Exception as e:
+        return (
+            jsonify(
+                {"code": 400, "success": False, "message": f"保存失败: {e}"}
+            ),
+            400,
+        )
+
+    crawl_scheduler.reset_timer()
+    started_now = False
+    if (
+        cur_sched["enabled"]
+        and req.get("run_immediately")
+        and not controller.is_running()
+    ):
+        ok, _ = controller.start()
+        started_now = ok
+
+    state_msg = (
+        f"已开启持续监听模式（每 {cur_sched['interval_minutes']} 分钟自动巡检增量微博）"
+        if cur_sched["enabled"]
+        else "已关闭持续监听模式（恢复单次运行）"
+    )
+    controller.log(f"⏰ [持续监听配置] {state_msg}")
+
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "started_now": started_now,
+            "message": state_msg,
+            "config": cur_sched,
+            "status": crawl_scheduler.get_status(),
+        }
+    )
 
 
 @app.route("/api/service/start", methods=["POST"])
@@ -749,236 +1074,61 @@ def api_import_users():
 
 
 # ==========================================
-# REST API: Cookie Check Utility
+# REST API: Cookie Check & Auto-Update Utility
 # ==========================================
-def verify_cookie_string(cookie_str):
-    if not cookie_str or cookie_str.strip() in ("your cookie", "YOUR_WEIBO_COOKIE_HERE"):
-        return {
-            "valid": False,
-            "message": "当前未配置 Cookie（处于免登录匿名模式）",
-            "user": {}
-        }
-
-    # 1. 探针 1：测试微博网页端 (weibo.com PC)
-    headers_pc = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Cookie": cookie_str,
-        "Referer": "https://weibo.com/",
-        "accept": "application/json, text/plain, */*",
-    }
-    try:
-        r_pc = requests.get(
-            "https://weibo.com/ajax/profile/detail", headers=headers_pc, timeout=6
-        )
-        if r_pc.status_code == 200:
-            js = r_pc.json()
-            if js.get("ok") == 1:
-                data_pc = js.get("data", {})
-                verified_url = data_pc.get("verified_url", "")
-                m = re.search(r"uid=(\d+)", verified_url)
-                uid = m.group(1) if m else ""
-                screen_name = ""
-                ip_location = data_pc.get("ip_location", "")
-                if uid:
-                    try:
-                        r_u = requests.get(
-                            f"https://weibo.com/ajax/profile/info?uid={uid}",
-                            headers=headers_pc,
-                            timeout=5,
-                        )
-                        if r_u.status_code == 200:
-                            u_info = r_u.json().get("data", {}).get("user", {})
-                            screen_name = u_info.get("screen_name", "")
-                    except Exception:
-                        pass
-                name_display = screen_name or (f"UID: {uid}" if uid else "已登录用户")
-                loc_display = f" ({ip_location})" if ip_location else ""
-                return {
-                    "valid": True,
-                    "message": f"Cookie 验证通过！登录账号：{name_display}{loc_display}",
-                    "user": {"id": uid, "screen_name": name_display},
-                }
-    except Exception as e:
-        logger.debug(f"PC probe failed: {e}")
-
-    # 2. 探针 2：测试微博移动端 (m.weibo.cn H5)
-    headers_mobile = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
-        ),
-        "Cookie": cookie_str,
-        "Referer": "https://m.weibo.cn/",
-        "accept": "application/json, text/plain, */*",
-    }
-    try:
-        r_mob = requests.get(
-            "https://m.weibo.cn/api/config", headers=headers_mobile, timeout=6
-        )
-        if r_mob.status_code == 200:
-            js = r_mob.json()
-            if js.get("data", {}).get("login") is True:
-                user = js.get("data", {}).get("user", {})
-                s_name = user.get("screen_name", "已登录用户")
-                return {
-                    "valid": True,
-                    "message": f"移动端 Cookie 验证通过！登录账号：{s_name}",
-                    "user": {"id": user.get("id", ""), "screen_name": s_name},
-                }
-    except Exception as e:
-        logger.debug(f"Mobile probe failed: {e}")
-
-    # 3. 探针 3：测试公共只读抓取权限（针对访客 Cookie 或 SUB 凭据）
-    try:
-        r_pub = requests.get(
-            "https://weibo.com/ajax/profile/info?custom=1669879400",
-            headers=headers_pc,
-            timeout=6,
-        )
-        if r_pub.status_code == 200 and r_pub.json().get("ok") == 1:
-            return {
-                "valid": True,
-                "message": "Cookie 连通性测试通过（具备微博公共数据抓取权限，未绑定个人账号画像）",
-                "user": {"id": "", "screen_name": "有效凭证 (公共抓取)"},
-            }
-    except Exception as e:
-        logger.debug(f"Public probe failed: {e}")
-
-    return {
-        "valid": False,
-        "message": "Cookie 认证未通过或已过期，未能获取到有效数据权限，建议重新登录并更新 Cookie",
-        "user": {}
-    }
-
-
-def extract_browser_cookies(browser_name="auto"):
-    """
-    通过 rookiepy 从本地浏览器自动提取微博 Cookie
-    """
-    try:
-        import rookiepy
-    except ImportError:
-        return None, "未安装 rookiepy 库，请先在终端运行 pip install rookiepy", None
-
-    browser_map = {
-        "chrome": ("Google Chrome", getattr(rookiepy, "chrome", None)),
-        "edge": ("Microsoft Edge", getattr(rookiepy, "edge", None)),
-        "firefox": ("Mozilla Firefox", getattr(rookiepy, "firefox", None)),
-        "safari": ("Apple Safari", getattr(rookiepy, "safari", None)),
-        "brave": ("Brave", getattr(rookiepy, "brave", None)),
-        "arc": ("Arc", getattr(rookiepy, "arc", None)),
-        "opera": ("Opera", getattr(rookiepy, "opera", None)),
-        "chromium": ("Chromium", getattr(rookiepy, "chromium", None)),
-        "vivaldi": ("Vivaldi", getattr(rookiepy, "vivaldi", None)),
-    }
-
-    domains = ["weibo.com", "weibo.cn"]
-
-    def try_extract_from(b_key):
-        b_info = browser_map.get(b_key)
-        if not b_info or not b_info[1]:
-            return None, f"当前环境暂不支持或未找到 {b_key} 提取接口"
-        b_name, fn = b_info
-        try:
-            raw_cookies = fn(domains)
-            if not raw_cookies:
-                return None, f"{b_name} 中未找到微博登录 Cookie"
-
-            def priority(c):
-                dom = c.get("domain", "")
-                if "visitor" in dom:
-                    return 0
-                if dom.endswith("weibo.com"):
-                    return 1
-                if dom.endswith("weibo.cn"):
-                    return 2
-                return 0
-
-            sorted_cookies = sorted(raw_cookies, key=priority)
-            cookie_dict = {}
-            has_sub = False
-            for c in sorted_cookies:
-                name = c.get("name")
-                val = c.get("value")
-                if name and val is not None:
-                    cookie_dict[name] = val
-                    if name == "SUB":
-                        has_sub = True
-
-            cookie_str = "; ".join([f"{k}={v}" for k, v in cookie_dict.items()])
-            return {
-                "cookie_str": cookie_str,
-                "browser_key": b_key,
-                "browser_name": b_name,
-                "count": len(cookie_dict),
-                "has_sub": has_sub
-            }, None
-        except Exception as e:
-            err_msg = str(e)
-            if "Operation not permitted" in err_msg or "Full Disk Access" in err_msg:
-                return None, f"{b_name} 读取受限（macOS 安全策略需要授予终端完全磁盘访问权限）"
-            if "Can't find cookies file" in err_msg or "can't find" in err_msg.lower():
-                return None, f"{b_name} 未找到 Cookie 数据文件（未安装或未产生数据）"
-            return None, f"{b_name} 读取异常: {err_msg}"
-
-    if browser_name and browser_name != "auto":
-        res, err = try_extract_from(browser_name)
-        if err:
-            return None, err, browser_name
-        return res["cookie_str"], None, res["browser_name"]
-
-    # 自动探测模式
-    candidates = ["chrome", "edge", "firefox", "brave", "arc", "safari", "opera", "chromium"]
-    results = []
-    errors = []
-    for b in candidates:
-        res, err = try_extract_from(b)
-        if res:
-            if res["has_sub"]:
-                return res["cookie_str"], None, res["browser_name"]
-            results.append(res)
-        elif err and "未安装" not in err and "未找到" not in err:
-            errors.append(err)
-
-    if results:
-        best = max(results, key=lambda x: x["count"])
-        return best["cookie_str"], None, best["browser_name"]
-
-    msg = "未能自动从本地浏览器中提取到微博 Cookie。"
-    if errors:
-        msg += " 失败提示: " + "；".join(errors[:2])
-    else:
-        msg += " 请确保已在 Chrome / Edge / Firefox 等浏览器登录过 weibo.com。"
-    return None, msg, None
-
-
 @app.route("/api/cookie/check", methods=["POST"])
 @app.route("/api/cookie/test", methods=["POST"])
 def api_check_cookie():
     req = request.get_json(silent=True) or {}
     cookie_str = req.get("cookie")
 
+    _, parsed, _ = read_raw_config()
     if not cookie_str:
-        # Load from config
-        _, parsed, _ = read_raw_config()
         cookie_str = parsed.get("cookie", "")
 
     result = verify_cookie_string(cookie_str)
-    return jsonify({
-        "code": 200,
-        "valid": result.get("valid", False),
-        "message": result.get("message", ""),
-        "user": result.get("user", {})
-    })
+    auto_cfg = get_cookie_auto_config(parsed)
+
+    # 如果当前未传入特定测试字符串、且检测出配置文件中的 Cookie 已失效，并且用户开启了失效自动更新：
+    if (
+        not req.get("cookie")
+        and not result.get("valid", False)
+        and auto_cfg.get("enabled")
+        and auto_cfg.get("refresh_on_expire", True)
+    ):
+        sync_res = cookie_updater.sync_now(
+            reason="连通性探针发现 Cookie 失效自动重提", only_if_expired=False
+        )
+        if sync_res.get("success") and sync_res.get("valid"):
+            return jsonify(
+                {
+                    "code": 200,
+                    "valid": True,
+                    "auto_refreshed": True,
+                    "message": f"原 Cookie 已失效，已自动从 {sync_res.get('browser')} 提取并恢复！{sync_res.get('message', '')}",
+                    "user": sync_res.get("user", {}),
+                    "auto_config": auto_cfg,
+                    "auto_status": cookie_updater.get_status(),
+                }
+            )
+
+    return jsonify(
+        {
+            "code": 200,
+            "valid": result.get("valid", False),
+            "message": result.get("message", ""),
+            "user": result.get("user", {}),
+            "auto_config": auto_cfg,
+            "auto_status": cookie_updater.get_status(),
+        }
+    )
 
 
 @app.route("/api/cookie/browsers", methods=["GET"])
 def api_cookie_browsers():
     try:
         import rookiepy
+
         available = True
     except ImportError:
         available = False
@@ -993,11 +1143,13 @@ def api_cookie_browsers():
         {"id": "arc", "name": "Arc Browser"},
         {"id": "opera", "name": "Opera Browser"},
     ]
-    return jsonify({
-        "code": 200,
-        "rookiepy_available": available,
-        "browsers": browsers
-    })
+    return jsonify(
+        {
+            "code": 200,
+            "rookiepy_available": available,
+            "browsers": browsers,
+        }
+    )
 
 
 @app.route("/api/cookie/import_browser", methods=["POST"])
@@ -1005,11 +1157,16 @@ def api_cookie_import_browser():
     # 安全保护：只允许本地请求读取本地浏览器 Cookie
     client_ip = request.remote_addr or ""
     if client_ip not in ("127.0.0.1", "::1", "localhost"):
-        return jsonify({
-            "code": 403,
-            "success": False,
-            "message": "为了安全起见，从本地浏览器提取 Cookie 仅允许本地访问 (localhost) 调用"
-        }), 403
+        return (
+            jsonify(
+                {
+                    "code": 403,
+                    "success": False,
+                    "message": "为了安全起见，从本地浏览器提取 Cookie 仅允许本地访问 (localhost) 调用",
+                }
+            ),
+            403,
+        )
 
     req = request.get_json(silent=True) or {}
     browser = req.get("browser", "auto")
@@ -1017,11 +1174,13 @@ def api_cookie_import_browser():
 
     cookie_str, err_msg, detected_browser = extract_browser_cookies(browser)
     if err_msg or not cookie_str:
-        return jsonify({
-            "code": 400,
-            "success": False,
-            "message": err_msg or "未能从浏览器提取到有效微博 Cookie"
-        })
+        return jsonify(
+            {
+                "code": 400,
+                "success": False,
+                "message": err_msg or "未能从浏览器提取到有效微博 Cookie",
+            }
+        )
 
     # 校验提取出的 Cookie
     check_result = verify_cookie_string(cookie_str)
@@ -1035,15 +1194,78 @@ def api_cookie_import_browser():
         except Exception as e:
             logger.error(f"Auto-saving cookie to config failed: {e}")
 
-    return jsonify({
-        "code": 200,
-        "success": True,
-        "browser": detected_browser or browser,
-        "cookie": cookie_str,
-        "valid": check_result.get("valid", False),
-        "user": check_result.get("user", {}),
-        "message": f"成功从 {detected_browser or browser} 提取微博 Cookie！" + (" " + check_result.get("message", "") if check_result.get("valid") else "")
-    })
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "browser": detected_browser or browser,
+            "cookie": cookie_str,
+            "valid": check_result.get("valid", False),
+            "user": check_result.get("user", {}),
+            "message": f"成功从 {detected_browser or browser} 提取微博 Cookie！"
+            + (
+                " " + check_result.get("message", "")
+                if check_result.get("valid")
+                else ""
+            ),
+        }
+    )
+
+
+@app.route("/api/cookie/auto_config", methods=["GET", "POST"])
+def api_cookie_auto_config():
+    if request.method == "GET":
+        _, parsed, _ = read_raw_config()
+        return jsonify(
+            {
+                "code": 200,
+                "config": get_cookie_auto_config(parsed),
+                "status": cookie_updater.get_status(),
+            }
+        )
+
+    req = request.get_json(silent=True) or {}
+    _, parsed, _ = read_raw_config()
+    cur_auto = get_cookie_auto_config(parsed)
+
+    for key in (
+        "enabled",
+        "browser",
+        "refresh_on_expire",
+        "check_before_start",
+        "interval_minutes",
+    ):
+        if key in req:
+            cur_auto[key] = req[key]
+
+    cur_auto = get_cookie_auto_config({"cookie_auto_config": cur_auto})
+    parsed["cookie_auto_config"] = cur_auto
+
+    try:
+        new_raw = json.dumps(parsed, indent=4, ensure_ascii=False)
+        save_config_content(new_raw)
+    except Exception as e:
+        return (
+            jsonify({"code": 400, "success": False, "message": f"保存失败: {e}"}),
+            400,
+        )
+
+    sync_res = None
+    if req.get("trigger_now"):
+        sync_res = cookie_updater.sync_now(
+            reason="手动触发立即同步", only_if_expired=False
+        )
+
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": "Cookie 自动更新策略已保存",
+            "config": cur_auto,
+            "status": cookie_updater.get_status(),
+            "sync_result": sync_res,
+        }
+    )
 
 
 

@@ -242,6 +242,41 @@ function updateStatusUI(data) {
   document.getElementById('btn-quick-stop').disabled = !isRunning;
   document.getElementById('btn-main-stop').disabled = !isRunning;
 
+  // Schedule / Continuous Monitor UI
+  if (data.schedule) {
+    const sched = data.schedule;
+    const dashSchedEnabled = document.getElementById('dash-schedule-enabled');
+    const dashSchedInterval = document.getElementById('dash-schedule-interval');
+    const dashSchedStatus = document.getElementById('dash-schedule-status');
+
+    if (dashSchedEnabled && document.activeElement !== dashSchedEnabled) {
+      dashSchedEnabled.checked = !!sched.enabled;
+    }
+    if (dashSchedInterval && document.activeElement !== dashSchedInterval && sched.interval_minutes) {
+      dashSchedInterval.value = String(sched.interval_minutes);
+    }
+    if (dashSchedStatus) {
+      if (sched.enabled) {
+        if (isRunning) {
+          dashSchedStatus.style.background = 'rgba(16, 185, 129, 0.16)';
+          dashSchedStatus.style.color = '#10b981';
+          dashSchedStatus.textContent = `🟢 持续监听中 · 当前正在执行巡检抓取 (已完成 ${sched.run_count || 0} 轮定时巡检)`;
+        } else {
+          const rem = sched.next_run_in_seconds != null ? sched.next_run_in_seconds : (sched.interval_minutes * 60);
+          const rm = Math.floor(rem / 60);
+          const rs = rem % 60;
+          dashSchedStatus.style.background = 'rgba(59, 130, 246, 0.16)';
+          dashSchedStatus.style.color = '#93c5fd';
+          dashSchedStatus.textContent = `🟢 持续监听已开启 · 下次巡检倒计时 ${rm}m ${rs}s (累计巡检 ${sched.run_count || 0} 轮)`;
+        }
+      } else {
+        dashSchedStatus.style.background = 'rgba(148, 163, 184, 0.15)';
+        dashSchedStatus.style.color = 'var(--text-dim)';
+        dashSchedStatus.textContent = '⚪ 单次运行（爬完即停）';
+      }
+    }
+  }
+
   // If on logs tab, fetch logs regularly
   if (state.currentTab === 'logs') {
     fetchLogs();
@@ -298,12 +333,69 @@ function initControlButtons() {
   document.getElementById('btn-quick-restart').addEventListener('click', () => handleRestart());
   document.getElementById('btn-main-restart').addEventListener('click', () => handleRestart());
 
+  // Continuous Monitor / Auto-Schedule Controls on Dashboard
+  const dashSchedEnabled = document.getElementById('dash-schedule-enabled');
+  const dashSchedInterval = document.getElementById('dash-schedule-interval');
+  const saveDashboardSchedule = async (runImm = false) => {
+    const enabled = dashSchedEnabled ? dashSchedEnabled.checked : false;
+    const interval_minutes = parseInt(dashSchedInterval ? dashSchedInterval.value : '30', 10) || 30;
+    try {
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, interval_minutes, run_immediately: runImm })
+      });
+      const json = await res.json();
+      if (json.code === 200) {
+        showToast(json.message + (json.started_now ? '，并已启动首轮巡检！' : ''), 'success');
+        const cfgSchedEnabled = document.getElementById('cfg-schedule-enabled');
+        const cfgSchedInterval = document.getElementById('cfg-schedule-interval');
+        if (cfgSchedEnabled) cfgSchedEnabled.checked = enabled;
+        if (cfgSchedInterval) cfgSchedInterval.value = String(interval_minutes);
+        fetchConfig();
+        fetchStatus();
+      } else {
+        showToast(json.message || '保存监听设置失败', 'error');
+      }
+    } catch (e) {
+      showToast('保存监听设置异常: ' + e, 'error');
+    }
+  };
+
+  if (dashSchedEnabled) {
+    dashSchedEnabled.addEventListener('change', () => {
+      saveDashboardSchedule(dashSchedEnabled.checked);
+    });
+  }
+  if (dashSchedInterval) {
+    dashSchedInterval.addEventListener('change', () => {
+      if (dashSchedEnabled && dashSchedEnabled.checked) {
+        saveDashboardSchedule(false);
+      }
+    });
+  }
+
   // Dashboard Cookie Test & Update
   document.getElementById('btn-test-cookie-dash').addEventListener('click', runCookieCheck);
+
+  const syncModalAutoFields = () => {
+    const autoCfg = (state.currentConfig && state.currentConfig.cookie_auto_config) || {};
+    const modalAutoEnabled = document.getElementById('modal-cookie-auto-enabled');
+    const modalAutoInterval = document.getElementById('modal-cookie-auto-interval');
+    const modalBrowser = document.getElementById('select-modal-browser');
+    if (modalAutoEnabled) modalAutoEnabled.checked = !!autoCfg.enabled;
+    if (modalAutoInterval && autoCfg.interval_minutes !== undefined) {
+      modalAutoInterval.value = String(autoCfg.interval_minutes);
+    }
+    if (modalBrowser && autoCfg.browser) {
+      modalBrowser.value = autoCfg.browser;
+    }
+  };
 
   const quickImportBtn = document.getElementById('btn-quick-import-browser');
   if (quickImportBtn) {
     quickImportBtn.addEventListener('click', () => {
+      syncModalAutoFields();
       openModal('modal-update-cookie');
       const modalBrowser = document.getElementById('select-modal-browser');
       if (modalBrowser) modalBrowser.value = 'auto';
@@ -320,6 +412,7 @@ function initControlButtons() {
     openCookieBtn.addEventListener('click', () => {
       const currentCookie = (state.currentConfig && state.currentConfig.cookie) || document.getElementById('cfg-cookie')?.value || '';
       document.getElementById('quick-cookie-input').value = currentCookie;
+      syncModalAutoFields();
       openModal('modal-update-cookie');
     });
   }
@@ -339,8 +432,12 @@ function initControlButtons() {
   if (confirmCookieBtn) {
     confirmCookieBtn.addEventListener('click', async () => {
       const newCookie = document.getElementById('quick-cookie-input').value.trim();
-      if (!newCookie) {
-        showToast('请输入有效的 Cookie 字符串', 'error');
+      const autoEnabled = document.getElementById('modal-cookie-auto-enabled')?.checked || false;
+      const autoInterval = parseInt(document.getElementById('modal-cookie-auto-interval')?.value || '360', 10);
+      const selectedBrowser = document.getElementById('select-modal-browser')?.value || 'auto';
+
+      if (!newCookie && !autoEnabled) {
+        showToast('请输入有效的 Cookie 字符串或开启浏览器自动更新', 'error');
         return;
       }
 
@@ -350,7 +447,18 @@ function initControlButtons() {
       try {
         // 1. 获取现有配置副本或从表单收集
         const current = state.currentConfig ? { ...state.currentConfig } : collectConfigForm();
-        current.cookie = newCookie;
+        if (newCookie) {
+          current.cookie = newCookie;
+        }
+        const prevAuto = current.cookie_auto_config || {};
+        current.cookie_auto_config = {
+          ...prevAuto,
+          enabled: autoEnabled,
+          browser: selectedBrowser,
+          refresh_on_expire: prevAuto.refresh_on_expire !== undefined ? prevAuto.refresh_on_expire : true,
+          check_before_start: prevAuto.check_before_start !== undefined ? prevAuto.check_before_start : true,
+          interval_minutes: isNaN(autoInterval) ? 360 : autoInterval
+        };
 
         // 2. 发送更新配置请求
         const res = await fetch('/api/config', {
@@ -361,12 +469,12 @@ function initControlButtons() {
         const json = await res.json();
 
         if (json.code === 200) {
-          showToast('Cookie 保存成功，正在进行连通性检测...', 'success');
+          showToast('Cookie 与自动更新策略保存成功，正在进行连通性检测...', 'success');
           closeModal('modal-update-cookie');
 
           // 同步参数配置页面的 Cookie 输入框
           const cfgCookieInput = document.getElementById('cfg-cookie');
-          if (cfgCookieInput) cfgCookieInput.value = newCookie;
+          if (cfgCookieInput && newCookie) cfgCookieInput.value = newCookie;
 
           // 重新拉取配置
           await fetchConfig();
@@ -437,17 +545,53 @@ async function importCookieFromBrowser({ browserSelectId, statusDivId, targetInp
   }
 }
 
+function renderCookieAutoStatusBadge(autoConfig, autoStatus) {
+  if (!autoConfig || !autoConfig.enabled) {
+    return `<span style="margin-left: 10px; font-size: 0.78rem; color: var(--text-dim);">[自动更新: 未开启]</span>`;
+  }
+  const intervalTxt = autoConfig.interval_minutes > 0 ? `每 ${autoConfig.interval_minutes} 分钟同步` : '仅失效/启动前自动提取';
+  const expireTxt = autoConfig.refresh_on_expire ? ' + 403失效热恢复' : '';
+  return `<span style="margin-left: 10px; padding: 2px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 0.76rem; font-weight: 500;">🔄 自动更新已开启 (${intervalTxt}${expireTxt})</span>`;
+}
+
+function updateSettingsCookieAutoStatusUI(autoConfig, autoStatus) {
+  const statusEl = document.getElementById('settings-cookie-auto-status');
+  if (!statusEl) return;
+  if (!autoConfig || !autoConfig.enabled) {
+    statusEl.innerHTML = `⚪ <strong>自动更新当前未开启</strong> — 开启后可在遇到 403/过期时自动从本地浏览器提取最新 Cookie 热替换，或按指定周期后台同步。`;
+    return;
+  }
+  const syncTime = (autoStatus && autoStatus.last_sync_time) ? autoStatus.last_sync_time : '尚未触发';
+  const syncCount = (autoStatus && autoStatus.sync_count) || 0;
+  const syncMsg = (autoStatus && autoStatus.last_sync_message) || '等待触发';
+  statusEl.innerHTML = `🟢 <strong>自动更新守护运行中</strong> | 累计自动同步: <code>${syncCount}</code> 次 | 最近活动 (${syncTime}): <span style="color: var(--text-muted);">${escapeHtml(syncMsg)}</span>`;
+}
+
+async function fetchCookieAutoStatus() {
+  try {
+    const res = await fetch('/api/cookie/auto_config');
+    const json = await res.json();
+    if (json.code === 200) {
+      updateSettingsCookieAutoStatusUI(json.config, json.status);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 async function runCookieCheck() {
   const banner = document.getElementById('cookie-status-banner');
   banner.innerHTML = '正在与微博官方服务器通信验证 Cookie，请稍候...';
   try {
     const res = await fetch('/api/cookie/check', { method: 'POST' });
     const json = await res.json();
+    const badgeHtml = renderCookieAutoStatusBadge(json.auto_config, json.auto_status);
+    updateSettingsCookieAutoStatusUI(json.auto_config, json.auto_status);
     if (json.valid) {
-      banner.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 600;">✅ ${json.message}</span>`;
-      showToast('Cookie 连通性验证成功', 'success');
+      banner.innerHTML = `<span style="color: var(--accent-emerald); font-weight: 600;">✅ ${json.message}</span>${badgeHtml}`;
+      showToast(json.auto_refreshed ? '检测到原 Cookie 失效，已自动从浏览器提取并恢复！' : 'Cookie 连通性验证成功', 'success');
     } else {
-      banner.innerHTML = `<span style="color: var(--accent-rose); font-weight: 600;">⚠️ ${json.message}</span>`;
+      banner.innerHTML = `<span style="color: var(--accent-rose); font-weight: 600;">⚠️ ${json.message}</span>${badgeHtml}`;
       showToast(json.message, 'error');
     }
   } catch (err) {
@@ -764,8 +908,35 @@ function populateConfigForm(cfg) {
   document.getElementById('cfg-start-page').value = cfg.start_page || 1;
   document.getElementById('cfg-page-count').value = cfg.page_weibo_count || 20;
 
+  // Schedule / Continuous Monitor
+  const schedCfg = cfg.schedule_config || {};
+  const cfgSchedEnabled = document.getElementById('cfg-schedule-enabled');
+  const cfgSchedInterval = document.getElementById('cfg-schedule-interval');
+  const dashSchedEnabled = document.getElementById('dash-schedule-enabled');
+  const dashSchedInterval = document.getElementById('dash-schedule-interval');
+  const schedIv = schedCfg.interval_minutes !== undefined ? schedCfg.interval_minutes : 30;
+  if (cfgSchedEnabled) cfgSchedEnabled.checked = !!schedCfg.enabled;
+  if (cfgSchedInterval) cfgSchedInterval.value = String(schedIv);
+  if (dashSchedEnabled) dashSchedEnabled.checked = !!schedCfg.enabled;
+  if (dashSchedInterval) dashSchedInterval.value = String(schedIv);
+
   // 2. Cookie
   document.getElementById('cfg-cookie').value = cfg.cookie || '';
+  const cookieAuto = cfg.cookie_auto_config || {};
+  const autoEnabledEl = document.getElementById('cfg-cookie-auto-enabled');
+  const autoExpireEl = document.getElementById('cfg-cookie-auto-expire');
+  const autoBeforeStartEl = document.getElementById('cfg-cookie-auto-before-start');
+  const autoBrowserEl = document.getElementById('cfg-cookie-auto-browser');
+  const autoIntervalEl = document.getElementById('cfg-cookie-auto-interval');
+  if (autoEnabledEl) autoEnabledEl.checked = !!cookieAuto.enabled;
+  if (autoExpireEl) autoExpireEl.checked = cookieAuto.refresh_on_expire !== false;
+  if (autoBeforeStartEl) autoBeforeStartEl.checked = cookieAuto.check_before_start !== false;
+  if (autoBrowserEl) autoBrowserEl.value = cookieAuto.browser || 'auto';
+  if (autoIntervalEl) {
+    const iv = cookieAuto.interval_minutes !== undefined ? cookieAuto.interval_minutes : 360;
+    autoIntervalEl.value = String(iv);
+  }
+  fetchCookieAutoStatus();
 
   // 3. Media
   document.getElementById('cfg-orig-pic').checked = (cfg.original_pic_download === 1);
@@ -889,8 +1060,27 @@ function collectConfigForm() {
   cfg.start_page = parseInt(document.getElementById('cfg-start-page').value, 10) || 1;
   cfg.page_weibo_count = parseInt(document.getElementById('cfg-page-count').value, 10) || 20;
 
+  // Schedule / Continuous Monitor
+  const prevSched = (state.currentConfig && state.currentConfig.schedule_config) || {};
+  const schedIvRaw = parseInt(document.getElementById('cfg-schedule-interval')?.value || '30', 10);
+  cfg.schedule_config = {
+    ...prevSched,
+    enabled: !!document.getElementById('cfg-schedule-enabled')?.checked,
+    interval_minutes: isNaN(schedIvRaw) ? 30 : schedIvRaw
+  };
+
   // 2. Cookie
   cfg.cookie = document.getElementById('cfg-cookie').value.trim();
+  const prevCookieAuto = (state.currentConfig && state.currentConfig.cookie_auto_config) || {};
+  const intervalRaw = parseInt(document.getElementById('cfg-cookie-auto-interval')?.value || '360', 10);
+  cfg.cookie_auto_config = {
+    ...prevCookieAuto,
+    enabled: !!document.getElementById('cfg-cookie-auto-enabled')?.checked,
+    refresh_on_expire: document.getElementById('cfg-cookie-auto-expire') ? document.getElementById('cfg-cookie-auto-expire').checked : true,
+    check_before_start: document.getElementById('cfg-cookie-auto-before-start') ? document.getElementById('cfg-cookie-auto-before-start').checked : true,
+    browser: document.getElementById('cfg-cookie-auto-browser')?.value || 'auto',
+    interval_minutes: isNaN(intervalRaw) ? 360 : intervalRaw
+  };
 
   // 3. Media
   cfg.original_pic_download = document.getElementById('cfg-orig-pic').checked ? 1 : 0;

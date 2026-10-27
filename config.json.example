@@ -5,6 +5,10 @@
     "end_date": "", // 截止爬取的时间范围（格式：YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS），为空则不限制，只爬取该日期之前发布的微博
     "start_page": 1, // 从第几页开始爬取，通常保持为1，断点续传时可调整
     "page_weibo_count": 20, // 每页爬取的微博数量（10-50之间），建议：10-20，太大可能被限制
+    "schedule_config": {
+        "enabled": false, // 是否开启持续监听模式（定时自动增量巡检新微博）
+        "interval_minutes": 30 // 每轮爬取完成后的休眠等待间隔（分钟），到期自动拉起下一轮增量抓取
+    },
     "write_mode": [
         "markdown",
         "csv",
@@ -87,8 +91,15 @@
     "remove_html_tag": 1, // 是否移除微博内容中的HTML标签 0 = 否，1 = 是
     "cookie": "YOUR_WEIBO_COOKIE_HERE",
     // 微博Cookie（重要！）
-    // 登录微博后，在浏览器开发者工具中获取
+    // 登录微博后，在浏览器开发者工具中获取，或在 Web 控制台中开启下方 cookie_auto_config 自动从本地浏览器同步
     // 格式：SCF=...; SUB=...; SUBP=...; ALF=...; SSOLoginState=...
+    "cookie_auto_config": {
+        "enabled": false, // 是否开启本地浏览器 Cookie 自动提取与更新
+        "browser": "auto", // 目标浏览器：auto, chrome, edge, firefox, safari, brave, arc, opera
+        "refresh_on_expire": true, // 爬虫运行中遇到 403/432/认证失效时，自动从浏览器提取新 Cookie 热更新并无缝重试
+        "check_before_start": true, // 每次启动爬虫任务前自动校验 Cookie，若失效则自动从浏览器提取更新
+        "interval_minutes": 360 // 后台周期性自动同步间隔（分钟），0 表示仅在失效或启动前触发
+    },
     "sqlite_db_path": "weibodata.db", // SQLite数据库文件路径，仅当 write_mode 包含 sqlite 时生效
     "mysql_config": {
         "host": "localhost",

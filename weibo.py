@@ -31,6 +31,7 @@ from tqdm import tqdm
 
 import const
 from util import csvutil
+from util.browser_cookie import extract_and_save_cookie, get_cookie_auto_config
 from util.dateutil import convert_to_days_ago
 from util.notify import push_deer
 from util.llm_analyzer import LLMAnalyzer  # 导入 LLM 分析器
@@ -280,6 +281,10 @@ class Weibo(object):
         self.anti_ban_config = config.get("anti_ban_config", {})
         self.anti_ban_enabled = self.anti_ban_config.get("enabled", False)
 
+        # Cookie 自动更新配置初始化
+        self.cookie_auto_config = get_cookie_auto_config(config)
+        self.last_cookie_refresh_time = 0
+
         # 爬取状态跟踪
         self.crawl_stats = {
             "weibo_count": 0,      # 已爬取微博数
@@ -289,6 +294,48 @@ class Weibo(object):
             "batch_count": 0,      # 当前批次计数
             "last_batch_time": None # 上次批次时间
         }
+
+    def try_auto_refresh_cookie(self, reason="认证失效/403"):
+        """当爬虫运行中遇到 403/432 或认证失效时，自动从本地浏览器提取最新 Cookie 热更新会话并写回配置"""
+        # 实时重新读取一次最新配置（以防用户在控制台刚开启了开关）
+        try:
+            latest_cfg = get_config()
+            self.cookie_auto_config = get_cookie_auto_config(latest_cfg)
+        except Exception:
+            pass
+
+        if not self.cookie_auto_config.get("enabled", False) or not self.cookie_auto_config.get("refresh_on_expire", True):
+            return False
+
+        # 冷却保护：15 秒内不重复提取，防止浏览器本身也未登录时死循环调用
+        now = time.time()
+        if now - self.last_cookie_refresh_time < 15:
+            return False
+        self.last_cookie_refresh_time = now
+
+        browser = self.cookie_auto_config.get("browser", "auto")
+        logger.info(f"🔄 [Cookie 自动更新] 检测到 {reason}，正在尝试从浏览器 ({browser}) 提取新 Cookie 热更新...")
+
+        res = extract_and_save_cookie(browser_name=browser, cookie_file_path=self.cookie_file_path)
+        if res.get("success") and res.get("cookie") and res.get("valid"):
+            new_cookies = {}
+            for pair in res["cookie"].split(";"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    new_cookies[k.strip()] = v.strip()
+
+            if new_cookies:
+                self.session.cookies.clear()
+                self.session.cookies.update(new_cookies)
+                try:
+                    self.session.get("https://m.weibo.cn", headers=self.headers, timeout=6)
+                except Exception:
+                    pass
+                logger.info(f"✅ [Cookie 自动更新] 热更新成功！{res.get('message', '')}，正在无缝重试当前请求...")
+                return True
+
+        logger.warning(f"⚠️ [Cookie 自动更新] 未能从浏览器提取到有效的新 Cookie: {res.get('message', '')}")
+        return False
     def calculate_dynamic_delay(self):
         """计算动态延迟时间"""
         if not self.anti_ban_enabled:
@@ -764,6 +811,9 @@ class Weibo(object):
                     logger.info(f"成功获取到页面 {page} 的数据。")
                     return js
                 else:
+                    if self.try_auto_refresh_cookie(reason=f"获取第 {page} 页微博受阻或认证过期"):
+                        retries = 0
+                        continue
                     logger.warning("未能获取到数据，可能需要验证码验证。")
                     if self.handle_captcha(js):
                         logger.info("用户已完成验证码验证，继续请求数据。")
@@ -782,6 +832,9 @@ class Weibo(object):
             except ValueError as ve:
                 err_str = str(ve)
                 if "Cookie" in err_str or "432" in err_str or "403" in err_str:
+                    if self.try_auto_refresh_cookie(reason=err_str):
+                        retries = 0
+                        continue
                     logger.error(f"❌ 关键认证错误: {err_str}")
                     return {}
                 retries += 1
@@ -1059,6 +1112,9 @@ class Weibo(object):
                     logger.info(f"成功获取到用户 {self.user_config['user_id']} 的信息。")
                     return 0
                 elif isinstance(js.get("url"), str) and js.get("url").strip():
+                    if self.try_auto_refresh_cookie(reason=f"获取用户 {self.user_config['user_id']} 信息受阻或需要重新认证"):
+                        retries = 0
+                        continue
                     logger.warning("未能获取到用户信息，可能需要验证码验证。")
                     if self.handle_captcha(js):
                         logger.info("用户已完成验证码验证，继续请求用户信息。")
@@ -1071,6 +1127,9 @@ class Weibo(object):
                     logger.warning("未能获取到用户信息，可能账号已注销或用户id有误。")
                     return 1
                 else:
+                    if self.try_auto_refresh_cookie(reason=f"获取用户 {self.user_config['user_id']} 信息返回异常"):
+                        retries = 0
+                        continue
                     logger.warning(f"未能获取到用户 {self.user_config['user_id']} 信息，响应异常。进行重试...")
                     retries += 1
                     sleep_time = min(backoff_factor * (1.5 ** retries), 30)
@@ -1086,6 +1145,9 @@ class Weibo(object):
             except ValueError as ve:
                 err_str = str(ve)
                 if "Cookie" in err_str or "432" in err_str or "403" in err_str:
+                    if self.try_auto_refresh_cookie(reason=err_str):
+                        retries = 0
+                        continue
                     logger.error(f"❌ 关键认证错误: {err_str}")
                     return 1
                 retries += 1
@@ -2043,6 +2105,15 @@ class Weibo(object):
             # 没有cookie会抓取失败
             # 微博日期小于某个日期的用这个url会被403 需要用老办法尝试一下
             error = True
+
+        if (error or not json or not json.get("data")) and req.status_code in (403, 418, 432):
+            if self.try_auto_refresh_cookie(reason=f"抓取评论遇到 HTTP {req.status_code}"):
+                req = self.session.get(url, params=params, headers=self.headers)
+                error = False
+                try:
+                    json = req.json()
+                except Exception:
+                    error = True
 
         if error:
             # 最大好像只能有50条 TODO: improvement
