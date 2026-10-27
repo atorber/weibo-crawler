@@ -54,7 +54,18 @@
     "random_rest_probability": 0.01
   },
   "user_id_as_folder_name": 0,
-  "cookie": "your cookie"
+  "cookie": "your cookie",
+  "cookie_auto_config": {
+    "enabled": true,
+    "browser": "auto",
+    "refresh_on_expire": true,
+    "check_before_start": true,
+    "interval_minutes": 360
+  },
+  "schedule_config": {
+    "enabled": false,
+    "interval_minutes": 30
+  }
 }
 ```
 
@@ -123,4 +134,30 @@
 | `retweet_live_photo_download` | `int` | `0` | 是否提取下载转发微博的 Live Photo 视频。 |
 | `write_time_in_exif` | `int` | `1` | 是否将微博发布时间写入已下载 JPG 图片的 EXIF 拍摄时间元数据中。 |
 | `change_file_time` | `int` | `1` | 是否将下载到本地的文件的修改时间修改为微博发布时间。 |
+
+---
+
+### 🔄 浏览器 Cookie 自动更新与失效热恢复 (`cookie_auto_config`)
+
+控制爬虫与 Web 控制台如何自动从本机浏览器提取、校验并热更新微博 Cookie：
+
+| 参数名 | 类型 | 默认值 | 详细说明 |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `false` | 是否开启本地浏览器 Cookie 自动提取与更新总开关。 |
+| `browser` | `str` | `"auto"` | 目标源浏览器。可选 `"auto"`（自动探测已登录浏览器）、`"chrome"`、`"edge"`、`"firefox"`、`"safari"`、`"brave"`、`"arc"`、`"opera"`。 |
+| `refresh_on_expire` | `bool` | `true` | 爬虫运行中遇到 `403` / `432` 或认证失效时，是否自动从浏览器提取新 Cookie 热替换当前 `Session` 并无缝重试（带 15 秒冷却保护）。 |
+| `check_before_start` | `bool` | `true` | 每次启动爬虫任务前是否自动探针检测 Cookie，若已失效则先自动从浏览器刷新后再启动。 |
+| `interval_minutes` | `int` | `360` | 后台周期性自动同步间隔（分钟）。设为 `0` 表示仅在失效或启动前触发；支持 `30`、`60`、`180`、`360`、`720`、`1440` 等。 |
+
+---
+
+### ⏰ 持续监听与定时增量巡检 (`schedule_config`)
+
+控制 Web 控制台是否开启 7×24 小时定时循环增量爬取：
+
+| 参数名 | 类型 | 默认值 | 详细说明 |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | `false` | 是否开启持续监听模式。开启后每轮爬完自动等待指定间隔并拉起下一轮增量巡检。 |
+| `interval_minutes` | `int` | `30` | 两轮增量巡检之间的休眠等待间隔（分钟，从上一轮任务完全结束后开始倒计时，防止并发重叠）。 |
+
 

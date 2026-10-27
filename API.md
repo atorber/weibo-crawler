@@ -67,19 +67,21 @@ python service.py --port 15001 --host 0.0.0.0
 
 | 模块 | Method | URL | 功能说明 |
 | :--- | :--- | :--- | :--- |
-| **状态调度** | `GET` | `/api/status` | 获取服务整体运行状态、监控指标与进程信息 |
+| **状态调度** | `GET` | `/api/status` | 获取服务整体运行状态、监控指标、持续监听倒计时与进程信息 |
 | | `POST` | `/api/service/start` | 启动爬虫子进程（支持临时指定用户列表） |
 | | `POST` | `/api/service/stop` | 停止当前运行中的爬虫进程 |
 | | `POST` | `/api/service/restart` | 重启爬虫进程 |
+| | `GET`/`POST` | `/api/schedule` | 查询或配置持续监听模式（定时自动增量巡检 `schedule_config`） |
 | **目标管理** | `GET` | `/api/users` | 获取当前监控的目标博主列表 |
 | | `POST` | `/api/users` | 添加或修改单个博主（UID、昵称、起始日期、过滤词） |
 | | `DELETE`| `/api/users/<user_id>` | 移除指定博主 |
 | | `POST` | `/api/users/import` | 批量文本导入博主列表（追加或覆盖） |
 | **配置中心** | `GET` | `/api/config` | 获取当前生效的 `config.json` 原始内容与解析对象 |
 | | `POST` | `/api/config` | 在线校验并保存配置（支持合并更新） |
-| **Cookie认证** | `POST` | `/api/cookie/check` | 验证 Cookie 连通性、抓取时延及归属用户信息 |
+| **Cookie认证** | `POST` | `/api/cookie/check` | 验证 Cookie 连通性、抓取时延及归属用户信息（支持失效自动重提） |
 | | `GET` | `/api/cookie/browsers`| 探测本机已安装且支持免密提取的浏览器 |
 | | `POST` | `/api/cookie/import_browser`| 一键从本地浏览器安全提取微博 Cookie |
+| | `GET`/`POST` | `/api/cookie/auto_config` | 查询或配置浏览器 Cookie 自动更新与 403 失效热恢复策略 |
 | **连通性测试** | `POST` | `/api/test/mysql` | 探测 MySQL 服务端版本、认证与网络时延 |
 | | `POST` | `/api/test/mongodb` | 探测 MongoDB 集群状态、版本与网络时延 |
 | | `POST` | `/api/test/webhook` | 探测 HTTP Webhook 端点连通性与鉴权响应 |
@@ -162,6 +164,32 @@ python service.py --port 15001 --host 0.0.0.0
 - **Method**: `POST`
 - **Content-Type**: `application/json`
 - **请求参数**: 同启动接口，支持可选 `user_id_list`。
+
+### 1.5 持续监听与定时增量巡检
+- **URL**: `/api/schedule`
+- **Method**: `GET` / `POST`
+- **Content-Type**: `application/json`
+- **POST 请求参数**:
+  - `enabled` (布尔值): 是否开启持续监听模式（开启后每轮爬完自动等待指定间隔并拉起下一轮增量巡检）
+  - `interval_minutes` (整数): 每轮结束后的等待间隔（分钟，默认 `30`）
+  - `run_immediately` (布尔值, 可选): 开启时若当前处于空闲状态，是否立即启动首轮巡检
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "started_now": true,
+  "message": "已开启持续监听模式（每 30 分钟自动巡检增量微博）",
+  "config": { "enabled": true, "interval_minutes": 30 },
+  "status": {
+    "enabled": true,
+    "interval_minutes": 30,
+    "last_trigger_time": "2026-10-27 10:30:00",
+    "run_count": 1,
+    "next_run_in_seconds": null
+  }
+}
+```
 
 ---
 
@@ -350,6 +378,39 @@ python service.py --port 15001 --host 0.0.0.0
   "valid": true,
   "message": "成功从 Google Chrome 提取微博 Cookie！Cookie 有效！响应时延: 165ms",
   "user": { "screen_name": "开发者" }
+}
+```
+
+### 4.4 Cookie 自动更新与失效热恢复策略
+- **URL**: `/api/cookie/auto_config`
+- **Method**: `GET` / `POST`
+- **Content-Type**: `application/json`
+- **POST 请求参数**:
+  - `enabled` (布尔值): 是否开启浏览器 Cookie 自动提取与更新总开关
+  - `browser` (字符串): 目标浏览器（`"auto"`, `"chrome"`, `"edge"`, `"firefox"`, `"safari"`, `"brave"`, `"arc"`, `"opera"`）
+  - `refresh_on_expire` (布尔值): 爬虫运行中遇到 403/432/认证失效时，自动从浏览器提取新 Cookie 热更新并无缝重试
+  - `check_before_start` (布尔值): 每次启动爬虫任务前自动检测并刷新失效 Cookie
+  - `interval_minutes` (整数): 后台定时同步周期（分钟，`0` 表示仅在失效或启动前触发）
+  - `trigger_now` (布尔值, 可选): 是否立即执行一次浏览器提取同步
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "Cookie 自动更新策略已保存",
+  "config": {
+    "enabled": true,
+    "browser": "auto",
+    "refresh_on_expire": true,
+    "check_before_start": true,
+    "interval_minutes": 360
+  },
+  "status": {
+    "last_sync_time": "2026-10-27 10:00:00",
+    "last_sync_status": "SUCCESS",
+    "last_sync_message": "[定时周期更新] 成功从 Google Chrome 提取微博 Cookie！",
+    "sync_count": 2
+  }
 }
 ```
 

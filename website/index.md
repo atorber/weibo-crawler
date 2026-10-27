@@ -33,8 +33,8 @@ features:
     title: AI Agent 技能 (weibo-viewer)
     details: 内置标准化 Agent 扩展包，支持大模型智能体自主调度爬虫、按关键词多维搜索与分析微博数据。
   - icon: 🔑
-    title: 浏览器 Cookie 免密读取
-    details: 无需繁琐 F12 抓包，一键自动探测提取 Chrome、Edge、Firefox、Safari、Brave 本地登录态。
+    title: 浏览器 Cookie 免密读取与热恢复
+    details: 一键探测提取 Chrome、Edge、Firefox、Safari 本地登录态，支持后台定时更新及 403/过期自动热替换无缝重试。
   - icon: 🛡️
     title: 智能反封禁与限频引擎
     details: 内置自适应请求频率限制、会话最大爬取上限、错误熔断与动态拟人随机休眠保护。
@@ -44,9 +44,9 @@ features:
   - icon: 📸
     title: 原图/视频/实况下载
     details: 支持无损大图、高清 MP4 视频、Live Photo 动态视频提取及拍摄时间 EXIF 自动回写。
-  - icon: 🔄
-    title: 定时增量与 Docker
-    details: 支持增量去重抓取与单次限制，内置标准 Dockerfile 与 docker-compose，开箱即用。
+  - icon: ⏰
+    title: 持续监听与 Docker 部署
+    details: 内置 7×24 小时定时增量巡检调度器，每轮爬完自动记录最新微博时间并倒计时拉起下一轮；提供标准 Docker 镜像。
 ---
 
 <div class="vp-doc" style="margin-top: 3.5rem;">

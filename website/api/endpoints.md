@@ -33,8 +33,36 @@
       "total_weibos": 2510,
       "db_connected": true,
       "log_entries_count": 136
+    },
+    "schedule": {
+      "enabled": true,
+      "interval_minutes": 30,
+      "last_trigger_time": "2026-10-27 10:30:00",
+      "run_count": 4,
+      "next_run_in_seconds": 1520
     }
   }
+}
+```
+
+---
+
+### 1.5 获取或设置持续监听模式 (`/api/schedule`)
+
+查询或修改定时自动增量巡检配置（`schedule_config`），支持开启时立即触发首轮巡检。
+
+- **URL**: `/api/schedule`
+- **Method**: `GET` / `POST`
+- **POST 请求参数**:
+  - `enabled` (布尔值): 是否开启持续监听模式
+  - `interval_minutes` (整数): 每轮结束后的等待间隔（分钟，默认 30）
+  - `run_immediately` (布尔值, 可选): 开启时若当前处于空闲状态，是否立即启动首轮巡检
+
+```json
+{
+  "enabled": true,
+  "interval_minutes": 30,
+  "run_immediately": true
 }
 ```
 
@@ -239,6 +267,33 @@ curl -X DELETE http://127.0.0.1:15001/api/users/1669879400
 {
   "browser": "auto",
   "save": true
+}
+```
+
+---
+
+### 3.4 Cookie 自动更新与失效热恢复策略
+
+查询或保存浏览器 Cookie 自动更新配置（`cookie_auto_config`）与后台守护同步状态。
+
+- **URL**: `/api/cookie/auto_config`
+- **Method**: `GET` / `POST`
+- **POST 请求参数**:
+  - `enabled` (布尔值): 是否开启浏览器 Cookie 自动更新
+  - `browser` (字符串): 目标浏览器（`"auto"`, `"chrome"`, `"edge"`, `"firefox"`, `"safari"` 等）
+  - `refresh_on_expire` (布尔值): 爬虫运行中遇到 403/432/认证失效时自动热更新并重试
+  - `check_before_start` (布尔值): 启动爬虫前自动检测并刷新失效 Cookie
+  - `interval_minutes` (整数): 后台定时同步周期（分钟，`0` 表示仅在失效或启动前触发）
+  - `trigger_now` (布尔值, 可选): 保存时是否立即执行一次浏览器 Cookie 提取同步
+
+```json
+{
+  "enabled": true,
+  "browser": "auto",
+  "refresh_on_expire": true,
+  "check_before_start": true,
+  "interval_minutes": 360,
+  "trigger_now": false
 }
 ```
 
