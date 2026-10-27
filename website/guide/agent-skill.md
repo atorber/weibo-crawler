@@ -36,9 +36,7 @@ skills/weibo-viewer/
 请帮我从 GitHub 安装微博爬虫技能 (weibo-viewer)：
 
 1. 目标仓库：https://github.com/atorber/weibo-crawler.git（分支 master）
-2. 将其中的 skills/weibo-viewer/ 目录下载并安装到我的环境：
-   - 如果是当前项目生效：安装到 .agents/skills/weibo-viewer/
-   - 如果想全局跨项目生效：安装到 ~/.gemini/config/skills/weibo-viewer/
+2. 将其中的 skills/weibo-viewer/ 目录下载并安装到当前项目的技能目录：.agents/skills/weibo-viewer/（或你所在 Agent 平台的技能目录）；
 3. 确保完整包含 SKILL.md、scripts/weibo_ctl.py 及 references/api_reference.md，并为 scripts/weibo_ctl.py 赋予可执行权限 (chmod +x)；
 4. 运行 `python .agents/skills/weibo-viewer/scripts/weibo_ctl.py status` 验证安装成功。
 ```
@@ -226,14 +224,14 @@ python skills/weibo-viewer/scripts/weibo_ctl.py cookie --extract --browser chrom
 
 1. 从 GitHub 仓库获取技能资源并部署到本地：
    - 目标仓库：https://github.com/atorber/weibo-crawler.git（分支 master）
-   - 将 skills/weibo-viewer/ 目录下载并安装到我的当前环境（项目级放入 .agents/skills/weibo-viewer/ 或全局放入 ~/.gemini/config/skills/weibo-viewer/）
+   - 将 skills/weibo-viewer/ 目录下载并安装到当前项目的技能目录：.agents/skills/weibo-viewer/（或你所在 Agent 平台的技能目录）
    - 为 scripts/weibo_ctl.py 赋予可执行权限 (chmod +x)
 2. 掌握核心操作能力（系统已提供双通道机制：默认优先连接本地 15001 端口服务，服务离线时自动直连本地 SQLite 数据库 weibodata.db）：
-   - 查看运行状态：python skills/weibo-viewer/scripts/weibo_ctl.py status
-   - 多维检索微博：python skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --user-id "<UID>" --limit 5
-   - 目标博主管理：python skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
-   - 启停任务调度：python skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
-   - 运行日志与Cookie：python skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
+   - 查看运行状态：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py status
+   - 多维检索微博：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --user-id "<UID>" --limit 5
+   - 目标博主管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
+   - 启停任务调度：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
+   - 运行日志与Cookie：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
 3. 运行 `status` 子命令验证安装，完成后告诉我你已就绪，随时可以按我的指令爬取微博或检索数据！
 ```
 :::

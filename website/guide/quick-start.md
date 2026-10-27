@@ -29,9 +29,16 @@ pip install -r requirements.txt
 
 ### 1. 启动控制台服务
 
-在项目根目录下直接运行：
+在项目根目录下直接运行一键启动脚本（或手动执行 `python service.py`）：
 
 ```bash
+# macOS / Linux 一键启动（自动检查环境、安装缺失依赖并打开浏览器）
+./start.sh
+
+# Windows 一键启动（支持直接双击 start.bat 运行）
+start.bat
+
+# 或手动通过 Python 启动
 python service.py
 ```
 

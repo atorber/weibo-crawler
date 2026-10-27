@@ -1045,7 +1045,11 @@ services:
 ### 启动 Web 控制台
 
 ```bash
-# 默认在 15001 端口启动，监听 0.0.0.0
+# 方式一：使用根目录一键启动脚本（自动检查环境、安装依赖、初始化配置并打开浏览器）
+./start.sh          # macOS / Linux
+start.bat           # Windows（支持直接双击运行）
+
+# 方式二：直接通过 Python 启动（默认在 15001 端口，监听 0.0.0.0）
 python service.py
 
 # 自定义端口与主机
@@ -1087,14 +1091,14 @@ python service.py --port 15001 --host 0.0.0.0
 请帮我从 GitHub 安装并掌握微博爬虫技能 (weibo-viewer)：
 
 1. 目标仓库：https://github.com/atorber/weibo-crawler.git（分支 master）
-2. 将其中的 skills/weibo-viewer/ 目录下载并安装到我的当前环境（项目级安装到 .agents/skills/weibo-viewer/ 或全局安装到 ~/.gemini/config/skills/weibo-viewer/）；
+2. 将其中的 skills/weibo-viewer/ 目录下载并安装到当前项目的技能目录：.agents/skills/weibo-viewer/（或你所在 Agent 平台的技能目录）；
 3. 确保包含 SKILL.md、scripts/weibo_ctl.py 及 references/api_reference.md，并为 scripts/weibo_ctl.py 赋予可执行权限 (chmod +x)；
 4. 掌握核心操作命令（默认服务端口 15001，服务离线时自动直连本地 SQLite weibodata.db）：
-   - 查询状态：python skills/weibo-viewer/scripts/weibo_ctl.py status
-   - 多维检索：python skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --limit 5
-   - 博主管理：python skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
-   - 爬取调度：python skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
-   - 日志与凭据：python skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
+   - 查询状态：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py status
+   - 多维检索：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --limit 5
+   - 博主管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
+   - 爬取调度：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
+   - 日志与凭据：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
 5. 运行 status 子命令验证安装，完成后告诉我你已就绪！
 ```
 

@@ -66,17 +66,14 @@ features:
 
 ::: code-group
 
-```bash [Web 控制台启动（推荐）]
+```bash [Web 控制台一键启动（推荐）]
 # 1. 克隆代码仓库
 git clone https://github.com/atorber/weibo-crawler.git
 cd weibo-crawler
 
-# 2. 安装依赖
-pip install -r requirements.txt
-
-# 3. 启动 Web 控制台
-python service.py
-# 浏览器访问 http://127.0.0.1:15001 即刻体验
+# 2. 一键启动（自动检查/安装依赖、初始化配置并打开 http://127.0.0.1:15001）
+./start.sh          # macOS / Linux
+start.bat           # Windows（支持直接双击运行）
 ```
 
 ```bash [命令行直接运行]
