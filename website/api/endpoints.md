@@ -548,7 +548,63 @@ curl -X DELETE http://127.0.0.1:15001/api/users/1669879400
 
 ---
 
-## 8. 兼容旧版端点 (Legacy API)
+## 8. Weibo 原生接口透明透传 (Native Pass-Through Proxy)
+
+> 只需将 `https://weibo.com`、`https://picupload.weibo.com` 或 `https://m.weibo.cn` 的域名与端口替换为当前服务地址（例如 `http://127.0.0.1:15001`），即可直接请求与微博官方完全一致的原生路径与参数，由后端自动注入登录态 Cookie、`X-XSRF-TOKEN`、协议头并在过期时自动握手或从本地浏览器刷新重试。
+
+### 8.1 PC 网页端 AJAX 全量透传 (``weibo.com/ajax/*``)
+
+- **URL**: ``/ajax/<path:subpath>`` -> 透传至 ``https://weibo.com/ajax/<subpath>``
+- **Method**: `GET`、`POST`、`PUT`、`DELETE`、`PATCH`、`HEAD`、`OPTIONS`
+- **常用接口覆盖（兼容 `weibo-pro-next` 全量 `/ajax/*`）**:
+  - 认证/配置：``/ajax/statuses/config``、``/ajax/config/get_config``、``/ajax/profile/detail``、``/ajax/profile/info``
+  - 个人主页与搜索：``/ajax/statuses/mymblog``、``/ajax/profile/searchblog``
+  - 详情/长文/编辑历史：``/ajax/statuses/show``、``/ajax/statuses/longtext``、``/ajax/statuses/editHistory``
+  - 评论与转发：``/ajax/statuses/buildComments``、``/ajax/statuses/repostTimeline``
+  - 发布与管理：``/ajax/statuses/update``、``/ajax/statuses/schedule/upload``、``/ajax/statuses/checkCanEdit``、``/ajax/statuses/modify``、``/ajax/statuses/modifyVisible``、``/ajax/statuses/destroy``
+  - 互动接口：``/ajax/comments/create``、``/ajax/comments/reply``、``/ajax/statuses/destroyComment``、``/ajax/statuses/normal_repost``、``/ajax/statuses/setLike``、``/ajax/statuses/cancelLike``
+- **特性说明**:
+  - 自动携带 `Referer: https://weibo.com/`、`Origin: https://weibo.com`、`X-Requested-With: XMLHttpRequest`、`client-version`、`server-version` 与 `X-XSRF-TOKEN`；
+  - 若 `POST` 请求发送 `application/json` 请求体，后端默认按 `cleanRequest` 清洗（保留 `0` 并序列化嵌套对象）并自动转为 `application/x-www-form-urlencoded`；可通过请求头 `X-Weibo-Raw-Body: 1` 禁用自动转换；
+  - 遇到 HTTP `400/401/403/419/432` 或 `ok === -100` 时自动刷新 `XSRF-TOKEN` 握手或从浏览器重新提取 `weibo.com` Cookie 后自动重试。
+
+### 8.2 图床原生上传透传 (``picupload.weibo.com/interface/*``)
+
+| 本地路由 | 上游地址 | Method | 说明 |
+| :--- | :--- | :--- | :--- |
+| ``/interface/upload.php`` | `https://picupload.weibo.com/interface/upload.php`（故障自动回退 `i.api.weibo.com`） | `POST` | 支持原始二进制体或 multipart (`file`/`pic1`)；自动补全 `cs` (CRC32)、`raw_md5`、`file_size`、`uid`、`request_id`，并按原生规则剥离 `X-Requested-With` 与 `X-XSRF-TOKEN` |
+| ``/interface/pic_upload.php`` | `https://picupload.weibo.com/interface/pic_upload.php` | `POST` | 默认注入 `app=miniblog&s=json&p=1&data=1`，兼容 `pic1` / `file` 表单字段或原始字节流 |
+
+### 8.3 移动版 H5 接口透传 (``m.weibo.cn/*``)
+
+| 本地路由 | 上游地址 | Method | 说明 |
+| :--- | :--- | :--- | :--- |
+| ``/api/container/getIndex`` | `https://m.weibo.cn/api/container/getIndex` | `GET` | 用户信息、微博流与搜索容器 |
+| ``/api/comments/show`` | `https://m.weibo.cn/api/comments/show` | `GET` | 评论最新流 |
+| ``/api/statuses/repostTimeline`` | `https://m.weibo.cn/api/statuses/repostTimeline` | `GET` | 转发列表 |
+| ``/comments/hotflow`` | `https://m.weibo.cn/comments/hotflow` | `GET` | 一级热门评论分页 |
+| ``/comments/hotFlowChild`` | `https://m.weibo.cn/comments/hotFlowChild` | `GET` | 二级评论回复分页 |
+| ``/statuses/show`` | `https://m.weibo.cn/statuses/show` | `GET` | 单条微博详情/可见性探测 |
+| ``/detail/<weibo_id>`` | `https://m.weibo.cn/detail/<weibo_id>` | `GET` | 单条微博 H5 页面（不附加 `X-Requested-With`） |
+| ``/m/api/config`` 或 ``/api/config?passthrough=1`` | `https://m.weibo.cn/api/config` | `GET` | 移动版配置与登录态探测（无 `?passthrough=1` 与 `X-Weibo-Passthrough: 1` 时 `/api/config` 保持返回控制台配置） |
+
+### 8.4 控制请求头与调用示例
+
+- `X-Weibo-Cookie`：为单次请求临时指定自定义 Cookie（跳过项目配置与浏览器提取）。
+- `X-Weibo-Raw-Body: 1`：对 `/ajax/*` `POST` 请求禁用 JSON 自动转表单，原样转发原始请求体。
+- 响应头 `X-Weibo-Passthrough-Upstream`：返回实际命中的上游完整 URL。
+
+```bash
+# 直接将 https://weibo.com 或 https://m.weibo.cn 替换为 http://127.0.0.1:15001
+curl "http://127.0.0.1:15001/ajax/statuses/mymblog?uid=1669879400&page=1&feature=0"
+curl -X POST "http://127.0.0.1:15001/ajax/statuses/update" -H "Content-Type: application/json" -d '{"content":"透传测试","visible":1}'
+curl "http://127.0.0.1:15001/api/container/getIndex?type=uid&value=1669879400"
+curl "http://127.0.0.1:15001/comments/hotflow?id=5367067832485479&mid=5367067832485479&max_id_type=0"
+```
+
+---
+
+## 9. 兼容旧版端点 (Legacy API)
 
 - ``POST /refresh``: 兼容旧版触发接口，返回 `202 Accepted` 或 `409 Conflict`
 - ``GET /task/<task_id>``: 兼容旧版任务状态轮询

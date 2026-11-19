@@ -46,11 +46,16 @@
   - [删除微博 (POST /api/publish/delete)](#87-删除微博)
   - [查询个人/控制台发布列表 (GET /api/publish/posts)](#88-查询个人控制台发布列表)
   - [微博图床防盗链图片代理 (GET /api/publish/image_proxy)](#89-微博图床防盗链图片代理)
-- [9. 兼容旧版端点 (Legacy API)](#9-兼容旧版端点-legacy-api)
-  - [异步刷新数据 (POST /refresh)](#91-异步刷新数据)
-  - [查询任务状态 (GET /task/\<task_id\>)](#92-查询任务状态)
-  - [获取微博列表 (GET /weibos)](#93-获取微博列表)
-  - [获取单条微博 (GET /weibos/\<weibo_id\>)](#94-获取单条微博)
+- [9. Weibo 原生接口透明透传 (Native Pass-Through Proxy)](#9-weibo-原生接口透明透传-native-pass-through-proxy)
+  - [PC 网页端 AJAX 全量透传 (`weibo.com/ajax/*`)](#91-pc-网页端-ajax-全量透传-weibocomajax)
+  - [图床原生上传透传 (`picupload.weibo.com/interface/*`)](#92-图床原生上传透传-picuploadweibocominterface)
+  - [移动版 H5 接口透传 (`m.weibo.cn/*`)](#93-移动版-h5-接口透传-mweibocn)
+  - [调用示例与高级控制头](#94-调用示例与高级控制头)
+- [10. 兼容旧版端点 (Legacy API)](#10-兼容旧版端点-legacy-api)
+  - [异步刷新数据 (POST /refresh)](#101-异步刷新数据)
+  - [查询任务状态 (GET /task/\<task_id\>)](#102-查询任务状态)
+  - [获取微博列表 (GET /weibos)](#103-获取微博列表)
+  - [获取单条微博 (GET /weibos/\<weibo_id\>)](#104-获取单条微博)
 - [统一响应与错误码规范](#统一响应与错误码规范)
 
 ---
@@ -107,6 +112,10 @@ python service.py --port 15001 --host 0.0.0.0
 | | `POST` | `/api/publish/delete` | 删除指定 `mid` 的微博 |
 | | `GET` | `/api/publish/posts` | 拉取当前账号远端微博列表与本地控制台发布历史 |
 | | `GET` | `/api/publish/image_proxy` | 携带微博 `Referer` 代理拉取官方图床图片（防盗链兼容） |
+| **原生透传** | `*` | `/ajax/<path:subpath>` | 1:1 透传 `https://weibo.com/ajax/<subpath>`（自动注入 Cookie/XSRF 与 403/过期重试） |
+| | `POST` | `/interface/upload.php` | 1:1 透传 `https://picupload.weibo.com/interface/upload.php`（自动补全 `cs`/`raw_md5`/`uid`，支持 `i.api.weibo.com` 容灾回退） |
+| | `POST` | `/interface/pic_upload.php` | 1:1 透传 `https://picupload.weibo.com/interface/pic_upload.php`（multipart `pic1` / `file` 或原始流） |
+| | `GET` | `/api/container/getIndex`、`...` | 1:1 透传 `https://m.weibo.cn/*`（含 `comments/hotflow`、`statuses/show`、`detail/<weibo_id>`、`/m/api/config` 等） |
 | **兼容旧版** | `POST` | `/refresh` | 触发采集任务（返回 202/409，带 task_id） |
 | | `GET` | `/task/<task_id>` | 查询指定 task_id 的进度与状态 |
 | | `GET` | `/weibos` | 获取最近 100 条抓取微博记录 |
@@ -747,11 +756,83 @@ python service.py --port 15001 --host 0.0.0.0
 
 ---
 
-## 9. 兼容旧版端点 (Legacy API)
+## 9. Weibo 原生接口透明透传 (Native Pass-Through Proxy)
+
+> 只需将官方域名替换为当前后端地址（默认 `http://127.0.0.1:15001`），即可直接沿用 `https://weibo.com`、`https://picupload.weibo.com` 与 `https://m.weibo.cn` 的原生路径、Query 参数与请求/响应体格式，由后端统一代管 Cookie、`X-XSRF-TOKEN`、协议头与过期自动重提刷新。
+
+### 9.1 PC 网页端 AJAX 全量透传 (`weibo.com/ajax/*`)
+
+- **本地路由**: `/ajax/<path:subpath>`（对应 `https://weibo.com/ajax/<subpath>`）
+- **支持方法**: `GET`、`POST`、`PUT`、`DELETE`、`PATCH`、`HEAD`、`OPTIONS`
+- **核心覆盖接口（包含项目调用及 `weibo-pro-next` 全部 `/ajax/*` 接口）**:
+  - 认证与配置：`GET /ajax/statuses/config`、`GET /ajax/config/get_config`、`GET /ajax/profile/detail`、`GET /ajax/profile/info`
+  - 个人列表与搜索：`GET /ajax/statuses/mymblog`、`GET /ajax/profile/searchblog`
+  - 博文详情/长文/编辑历史：`GET /ajax/statuses/show`、`GET /ajax/statuses/longtext`、`GET /ajax/statuses/editHistory`
+  - 评论与转发：`GET /ajax/statuses/buildComments`、`GET /ajax/statuses/repostTimeline`
+  - 发布与博文管理：`POST /ajax/statuses/update`、`POST /ajax/statuses/schedule/upload`、`GET /ajax/statuses/checkCanEdit`、`POST /ajax/statuses/modify`、`POST /ajax/statuses/modifyVisible`、`POST /ajax/statuses/destroy`
+  - 互动写操作：`POST /ajax/comments/create`、`POST /ajax/comments/reply`、`POST /ajax/statuses/destroyComment`、`POST /ajax/statuses/normal_repost`、`POST /ajax/statuses/setLike`、`POST /ajax/statuses/cancelLike`
+- **协议处理说明**:
+  - 自动补齐 `Referer: https://weibo.com/`、`Origin: https://weibo.com`、`X-Requested-With: XMLHttpRequest`、`client-version`、`server-version` 与 `X-XSRF-TOKEN`；
+  - 若 `POST` 等写请求传入 `Content-Type: application/json`，后端默认按 `weibo-pro-next` 的 `cleanRequest` 规则过滤空值（保留整数 `0`，将嵌套列表/对象转为 JSON 字符串）并转为微博原生 `application/x-www-form-urlencoded` 表单发送；
+  - 遇到 HTTP `400/401/403/419/432` 或 JSON `{"ok": -100}` 时自动刷新 `XSRF-TOKEN` 握手或从浏览器重提 Cookie 并自动重试一次。
+
+### 9.2 图床原生上传透传 (`picupload.weibo.com/interface/*`)
+
+| 本地路由 | 上游目标 | 方法 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `/interface/upload.php` | `https://picupload.weibo.com/interface/upload.php`（失败自动回退 `i.api.weibo.com`） | `POST` | 支持 `application/octet-stream` 原始二进制或 `multipart/form-data` (`file`/`pic1`)；缺失参数时自动计算 `cs` (CRC32)、`raw_md5`、`file_size`、`uid`、`request_id`，并按原生协议剥离 `X-Requested-With` / `X-XSRF-TOKEN` |
+| `/interface/pic_upload.php` | `https://picupload.weibo.com/interface/pic_upload.php` | `POST` | 默认注入 `app=miniblog&s=json&p=1&data=1`，兼容 `pic1` 或 `file` 表单字段上传及原始字节流 |
+
+### 9.3 移动版 H5 接口透传 (`m.weibo.cn/*`)
+
+针对爬虫与探索接口用到的全部 `https://m.weibo.cn` 端点提供白名单校验后 1:1 透传：
+
+| 本地路由 | 上游目标 | 方法 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `/api/container/getIndex` | `https://m.weibo.cn/api/container/getIndex` | `GET` | 用户信息、微博分页流与搜索 |
+| `/api/comments/show` | `https://m.weibo.cn/api/comments/show` | `GET` | 评论最新流分页 |
+| `/api/statuses/repostTimeline` | `https://m.weibo.cn/api/statuses/repostTimeline` | `GET` | 转发列表分页 |
+| `/comments/hotflow` | `https://m.weibo.cn/comments/hotflow` | `GET` | 一级热门评论分页 |
+| `/comments/hotFlowChild` | `https://m.weibo.cn/comments/hotFlowChild` | `GET` | 二级评论回复分页 |
+| `/statuses/show` | `https://m.weibo.cn/statuses/show` | `GET` | 单条微博详情/可见性探测 |
+| `/detail/<weibo_id>` | `https://m.weibo.cn/detail/<weibo_id>` | `GET` | 单条微博 H5 详情页（保留 HTML MIME，自动剥离 `X-Requested-With`） |
+| `/m/api/config` 或 `/api/config?passthrough=1` | `https://m.weibo.cn/api/config` | `GET` | `m.weibo.cn` 登录态与全局配置探针（无 `?passthrough=1` 与 `X-Weibo-Passthrough: 1` 时 `/api/config` 仍返回本地控制台配置） |
+
+### 9.4 调用示例与高级控制头
+
+- **可选请求头**：
+  - `X-Weibo-Cookie`：按单次请求临时覆盖项目配置的微博 Cookie（不会修改本地配置文件或触发本机浏览器提取）；若传入的 `Cookie` 请求头包含 `SUB` / `SUBP` / `XSRF-TOKEN` 等微博认证字段同样有效。
+  - `X-Weibo-Raw-Body: 1`：禁止后端将 `POST` JSON 请求体自动转换为 `application/x-www-form-urlencoded`，原样透传原始请求体。
+  - `X-Weibo-Passthrough: 1`：用于 `/api/config`，使其透传至 `https://m.weibo.cn/api/config`。
+- **响应追踪头**：每个透传响应均附带 `X-Weibo-Passthrough-Upstream`，标明实际转发的上游完整 URL，且原样保留上游 HTTP 状态码与主体字节。
+
+```bash
+# 1. 查询博主主页微博列表（等价于请求 https://weibo.com/ajax/statuses/mymblog）
+curl "http://127.0.0.1:15001/ajax/statuses/mymblog?uid=1669879400&page=1&feature=0"
+
+# 2. 原生发博接口透传（支持表单或直接传 JSON 自动转表单）
+curl -X POST "http://127.0.0.1:15001/ajax/statuses/update" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "原生透传测试 #weibo#", "visible": 1}'
+
+# 3. 图床原始二进制上传透传（自动补齐 cs / raw_md5 / uid）
+curl -X POST "http://127.0.0.1:15001/interface/upload.php" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @photo.jpg
+
+# 4. 移动版 H5 评论/容器接口透传（等价于 https://m.weibo.cn/...）
+curl "http://127.0.0.1:15001/api/container/getIndex?type=uid&value=1669879400"
+curl "http://127.0.0.1:15001/comments/hotflow?id=5367067832485479&mid=5367067832485479&max_id_type=0"
+curl "http://127.0.0.1:15001/m/api/config"
+```
+
+---
+
+## 10. 兼容旧版端点 (Legacy API)
 
 为了与历史第三方接入系统保持 100% 向后兼容，以下经典端点保持完整支持：
 
-### 9.1 异步刷新数据
+### 10.1 异步刷新数据
 - **URL**: `/refresh`
 - **Method**: `POST`
 - **请求体**: `{"user_id_list": ["6067225218"]}` (可选)
@@ -759,7 +840,7 @@ python service.py --port 15001 --host 0.0.0.0
   - `202 Accepted`: 任务成功启动，返回 `task_id`（当前进程 PID）
   - `409 Conflict`: 当前已有正在执行的任务
 
-### 9.2 查询任务状态
+### 10.2 查询任务状态
 - **URL**: `/task/<task_id>`
 - **Method**: `GET`
 - **响应示例**:
@@ -771,12 +852,12 @@ python service.py --port 15001 --host 0.0.0.0
 }
 ```
 
-### 9.3 获取微博列表
+### 10.3 获取微博列表
 - **URL**: `/weibos`
 - **Method**: `GET`
 - **说明**: 直接返回最近 100 条抓取微博的数组列表。
 
-### 9.4 获取单条微博
+### 10.4 获取单条微博
 - **URL**: `/weibos/<weibo_id>`
 - **Method**: `GET`
 - **状态码**: 200（找到）或 404（不存在）。

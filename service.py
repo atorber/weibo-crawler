@@ -45,6 +45,7 @@ from util.browser_cookie import (
     verify_cookie_string,
 )
 from util.config import config_paths
+from util.passthrough import WeiboPassthroughProxy
 from util.publish.weibo_publisher import (
     DEFAULT_USER_AGENT,
     VISIBLE_OPTIONS,
@@ -57,7 +58,7 @@ from weibo import get_config as get_weibo_config, handle_config_renaming
 BASE_DIR = os.path.split(os.path.realpath(__file__))[0]
 CONFIG_PATH, EXAMPLE_CONFIG_PATH = config_paths.config_files(BASE_DIR)
 USER_ID_FILE_PATH = config_paths.resolve_config_file(BASE_DIR, "user_id_list.txt")
-LOG_DIR = os.path.join(BASE_DIR, "log")
+LOG_DIR = os.environ.get("WEIBO_LOG_DIR") or os.path.join(BASE_DIR, "log")
 PUBLISH_HISTORY_PATH = os.path.join(LOG_DIR, "publish_history.json")
 _publish_history_lock = threading.Lock()
 
@@ -65,7 +66,7 @@ if not os.path.isdir(LOG_DIR):
     os.makedirs(LOG_DIR)
 
 logging_conf = config_paths.resolve_config_file(BASE_DIR, "logging.conf")
-if os.path.isfile(logging_conf):
+if os.path.isfile(logging_conf) and not os.environ.get("WEIBO_LOG_DIR"):
     try:
         logging.config.fileConfig(logging_conf)
     except Exception as e:
@@ -752,6 +753,8 @@ app = Flask(
 app.config["JSON_AS_ASCII"] = False
 app.config["JSONIFY_MIMETYPE"] = "application/json;charset=utf-8"
 
+passthrough_proxy = WeiboPassthroughProxy(project_root=BASE_DIR)
+
 @app.after_request
 def add_no_cache_headers(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -931,6 +934,20 @@ def api_clear_logs():
 # ==========================================
 @app.route("/api/config", methods=["GET"])
 def api_get_config():
+    passthrough_flag = (
+        request.args.get("passthrough") or request.headers.get("X-Weibo-Passthrough") or ""
+    ).strip().lower()
+    if passthrough_flag in ("1", "true"):
+        query_params = request.args.to_dict(flat=False)
+        query_params.pop("passthrough", None)
+        status_code, resp_headers, content_bytes = passthrough_proxy.proxy_mobile_weibo(
+            "api/config",
+            method=request.method,
+            query_params=query_params,
+            headers=dict(request.headers),
+        )
+        return _build_passthrough_flask_response(status_code, resp_headers, content_bytes)
+
     raw_str, parsed, is_custom = read_raw_config()
     return jsonify(
         {
@@ -1812,6 +1829,131 @@ def api_publish_image_proxy():
         mimetype=content_type,
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+# ==========================================
+# Native Weibo API Pass-Through Proxy Routes
+# ==========================================
+def _build_passthrough_flask_response(status_code, resp_headers, content_bytes):
+    return Response(content_bytes, status=status_code, headers=resp_headers)
+
+
+def _extract_request_query_and_files():
+    query_params = request.args.to_dict(flat=False)
+    headers = dict(request.headers)
+    mimetype = (request.mimetype or "").lower()
+    if mimetype == "multipart/form-data" or request.files:
+        files = {k: request.files[k] for k in request.files}
+        form_data = request.form.to_dict(flat=False)
+        return query_params, headers, None, None, form_data, files
+
+    raw_body = request.get_data()
+    json_body = request.get_json(silent=True) if request.is_json else None
+    form_data = (
+        request.form.to_dict(flat=False)
+        if mimetype == "application/x-www-form-urlencoded"
+        else None
+    )
+    return query_params, headers, raw_body, json_body, form_data, None
+
+
+@app.route(
+    "/ajax/<path:subpath>",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+)
+def passthrough_weibo_ajax(subpath):
+    query_params, headers, raw_body, json_body, form_data, files = (
+        _extract_request_query_and_files()
+    )
+    status_code, resp_headers, content_bytes = passthrough_proxy.proxy_weibo_ajax(
+        subpath,
+        method=request.method,
+        query_params=query_params,
+        headers=headers,
+        body=raw_body,
+        json_body=json_body,
+        form_data=form_data,
+        files=files,
+    )
+    return _build_passthrough_flask_response(status_code, resp_headers, content_bytes)
+
+
+@app.route("/interface/upload.php", methods=["POST"])
+def passthrough_picupload_binary():
+    query_params, headers, raw_body, _, _, files = _extract_request_query_and_files()
+    status_code, resp_headers, content_bytes = passthrough_proxy.proxy_picupload(
+        "upload.php",
+        query_params=query_params,
+        headers=headers,
+        body=raw_body,
+        files=files,
+    )
+    return _build_passthrough_flask_response(status_code, resp_headers, content_bytes)
+
+
+@app.route("/interface/pic_upload.php", methods=["POST"])
+def passthrough_picupload_multipart():
+    query_params, headers, raw_body, _, _, files = _extract_request_query_and_files()
+    status_code, resp_headers, content_bytes = passthrough_proxy.proxy_picupload(
+        "pic_upload.php",
+        query_params=query_params,
+        headers=headers,
+        body=raw_body,
+        files=files,
+    )
+    return _build_passthrough_flask_response(status_code, resp_headers, content_bytes)
+
+
+def _serve_mobile_passthrough(mobile_path: str):
+    query_params, headers, raw_body, _, _, _ = _extract_request_query_and_files()
+    status_code, resp_headers, content_bytes = passthrough_proxy.proxy_mobile_weibo(
+        mobile_path,
+        method=request.method,
+        query_params=query_params,
+        headers=headers,
+        body=raw_body,
+    )
+    return _build_passthrough_flask_response(status_code, resp_headers, content_bytes)
+
+
+@app.route("/api/container/getIndex", methods=["GET"])
+def passthrough_mobile_get_index():
+    return _serve_mobile_passthrough("api/container/getIndex")
+
+
+@app.route("/api/comments/show", methods=["GET"])
+def passthrough_mobile_comments_show():
+    return _serve_mobile_passthrough("api/comments/show")
+
+
+@app.route("/api/statuses/repostTimeline", methods=["GET"])
+def passthrough_mobile_repost_timeline():
+    return _serve_mobile_passthrough("api/statuses/repostTimeline")
+
+
+@app.route("/comments/hotflow", methods=["GET"])
+def passthrough_mobile_hotflow():
+    return _serve_mobile_passthrough("comments/hotflow")
+
+
+@app.route("/comments/hotFlowChild", methods=["GET"])
+def passthrough_mobile_hotflow_child():
+    return _serve_mobile_passthrough("comments/hotFlowChild")
+
+
+@app.route("/statuses/show", methods=["GET"])
+def passthrough_mobile_statuses_show():
+    return _serve_mobile_passthrough("statuses/show")
+
+
+@app.route("/detail/<weibo_id>", methods=["GET"])
+def passthrough_mobile_detail(weibo_id):
+    return _serve_mobile_passthrough(f"detail/{weibo_id}")
+
+
+@app.route("/m/api/config", methods=["GET"])
+def passthrough_mobile_api_config():
+    return _serve_mobile_passthrough("api/config")
 
 
 # ==========================================
