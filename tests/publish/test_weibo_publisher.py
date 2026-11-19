@@ -1,5 +1,6 @@
 """Tests for WeiboPublisher, browser cookie domain priority, and weibo_ctl publish CLI."""
 
+from collections.abc import MutableMapping
 import hashlib
 import importlib.util
 import io
@@ -457,6 +458,45 @@ class WeiboPublisherTest(unittest.TestCase):
         pic = res["items"][0]["pics"][0]
         self.assertEqual(pic["url"], "https://wx2.sinaimg.cn/bmiddle/picA.jpg")
         self.assertEqual(pic["large_url"], "https://wx2.sinaimg.cn/large/picA.jpg")
+
+    def test_init_populates_headers_on_non_dict_mapping_session(self):
+        class _CaseInsensitiveHeaders(MutableMapping):
+            def __init__(self):
+                self._store = {}
+
+            def __getitem__(self, key):
+                return self._store[key.lower()][1]
+
+            def __setitem__(self, key, value):
+                self._store[key.lower()] = (key, value)
+
+            def __delitem__(self, key):
+                del self._store[key.lower()]
+
+            def __iter__(self):
+                return (orig for orig, _ in self._store.values())
+
+            def __len__(self):
+                return len(self._store)
+
+        headers = _CaseInsensitiveHeaders()
+        self.assertNotIsInstance(headers, dict)
+
+        sess = _FakeSession()
+        sess.headers = headers
+        pub = WeiboPublisher(cookie="SUB=abc; XSRF-TOKEN=tok_non_dict", session=sess, auto_refresh=False)
+
+        self.assertEqual(pub.session.headers["Referer"], "https://weibo.com/")
+        self.assertEqual(pub.session.headers["Origin"], "https://weibo.com")
+        self.assertEqual(pub.session.headers["X-Requested-With"], "XMLHttpRequest")
+        self.assertEqual(pub.session.headers["Accept"], "application/json, text/plain, */*")
+        self.assertEqual(pub.session.headers["User-Agent"], weibo_publisher.DEFAULT_USER_AGENT)
+        self.assertEqual(pub.session.headers["client-version"], weibo_publisher.DEFAULT_CLIENT_VERSION)
+        self.assertEqual(pub.session.headers["server-version"], weibo_publisher.DEFAULT_SERVER_VERSION)
+
+        token = pub._sync_xsrf_header()
+        self.assertEqual(token, "tok_non_dict")
+        self.assertEqual(pub.session.headers["X-XSRF-TOKEN"], "tok_non_dict")
 
 
 if __name__ == "__main__":

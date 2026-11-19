@@ -171,8 +171,9 @@ class WeiboPublisher:
             self.cookie_str = str(cookie).strip()
 
         self.session = session or requests.Session()
-        if hasattr(self.session, "headers") and isinstance(self.session.headers, dict):
-            self.session.headers.update(
+        headers_obj = getattr(self.session, "headers", None)
+        if headers_obj is not None and hasattr(headers_obj, "update"):
+            headers_obj.update(
                 {
                     "User-Agent": DEFAULT_USER_AGENT,
                     "Accept": "application/json, text/plain, */*",
@@ -248,8 +249,9 @@ class WeiboPublisher:
 
     def _sync_xsrf_header(self) -> str:
         token = self._latest_xsrf_token()
-        if token:
-            self.session.headers["X-XSRF-TOKEN"] = token
+        headers_obj = getattr(self.session, "headers", None)
+        if token and headers_obj is not None:
+            headers_obj["X-XSRF-TOKEN"] = token
         return token
 
     def _try_browser_refresh(self) -> bool:

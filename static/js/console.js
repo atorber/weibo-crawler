@@ -2445,7 +2445,8 @@ async function fetchChatStatus() {
     const data = json.data || {};
     state.chatStatus = data;
     if (data.authenticated) {
-      const avatar = data.avatar_hd ? `<img src="${escapeHtml(getProxiedWeiboImageUrl(data.avatar_hd))}" alt="avatar" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;margin-right:6px;">` : '';
+      const avatarSrc = data.avatar_hd || data.avatar || '';
+      const avatar = avatarSrc ? `<img src="${escapeHtml(proxyWeiboImageUrl(avatarSrc))}" alt="avatar" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;margin-right:6px;">` : '';
       bar.className = 'publish-auth-bar auth-ok';
       bar.innerHTML = `<span>✅ ${avatar}WebIM 已连接：<strong>${escapeHtml(data.screen_name || data.uid)}</strong> (UID: <code>${escapeHtml(data.uid)}</code>)</span><span style="font-size:0.78rem;opacity:0.85;">接口源: api.weibo.com/webim (source=209678993)</span>`;
     } else {
@@ -2489,7 +2490,7 @@ async function fetchChatContacts() {
       const unreadBadge = c.unread_count > 0
         ? `<span class="chat-unread-badge">${c.unread_count > 99 ? '99+' : c.unread_count}</span>`
         : '';
-      const avatarUrl = c.avatar ? getProxiedWeiboImageUrl(c.avatar) : '/static/img/logo.svg';
+      const avatarUrl = c.avatar ? proxyWeiboImageUrl(c.avatar) : '/static/img/logo.svg';
       const snippet = c.last_text || (c.is_group ? `群号: ${id}` : `UID: ${id}`);
       return `
         <div class="chat-contact-item ${activeClass}" data-id="${escapeHtml(id)}" data-name="${escapeHtml(c.name || id)}" data-group="${c.is_group ? '1' : '0'}">
