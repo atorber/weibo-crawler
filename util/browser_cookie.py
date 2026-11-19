@@ -19,11 +19,12 @@ except ImportError:
     json5 = None
 import requests
 
+from util.config import config_paths
+
 logger = logging.getLogger("weibo.cookie")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + os.sep
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-EXAMPLE_CONFIG_PATH = os.path.join(BASE_DIR, "config.json.example")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+CONFIG_PATH, EXAMPLE_CONFIG_PATH = config_paths.config_files(BASE_DIR)
 
 DEFAULT_COOKIE_AUTO_CONFIG = {
     "enabled": False,

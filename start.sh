@@ -18,10 +18,10 @@ echo "🚀 Weibo Crawler 一键启动工具 (macOS / Linux)"
 echo "📂 工作目录: $SCRIPT_DIR"
 echo "======================================================="
 
-# 1. 自动初始化配置文件 config.json
-if [ ! -f "config.json" ] && [ -f "config.json.example" ]; then
-    echo "📝 未检测到 config.json，正在从 config.json.example 自动初始化..."
-    cp config.json.example config.json
+# 1. 自动初始化配置文件 config/config.json（兼容根目录旧 config.json）
+if [ ! -f "config/config.json" ] && [ ! -f "config.json" ] && [ -f "config/config.json.example" ]; then
+    echo "📝 未检测到 config/config.json，正在从 config/config.json.example 自动初始化..."
+    cp config/config.json.example config/config.json
 fi
 
 # 2. 探测可用的 Python 解释器与虚拟环境

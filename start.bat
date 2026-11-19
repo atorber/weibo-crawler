@@ -18,11 +18,11 @@ echo 🚀 Weibo Crawler 一键启动工具 (Windows)
 echo 📂 工作目录: %CD%
 echo =======================================================
 
-:: 1. 自动初始化配置文件 config.json
-if not exist "config.json" (
-    if exist "config.json.example" (
-        echo 📝 未检测到 config.json，正在从 config.json.example 自动初始化...
-        copy /y "config.json.example" "config.json" >nul
+:: 1. 自动初始化配置文件 config\config.json（兼容根目录旧 config.json）
+if not exist "config\config.json" if not exist "config.json" (
+    if exist "config\config.json.example" (
+        echo 📝 未检测到 config\config.json，正在从 config\config.json.example 自动初始化...
+        copy /y "config\config.json.example" "config\config.json" >nul
     )
 )
 

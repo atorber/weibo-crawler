@@ -43,18 +43,18 @@ from util.browser_cookie import (
     get_cookie_auto_config,
     verify_cookie_string,
 )
+from util.config import config_paths
 from weibo import get_config as get_weibo_config, handle_config_renaming
 
-BASE_DIR = os.path.split(os.path.realpath(__file__))[0] + os.sep
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-EXAMPLE_CONFIG_PATH = os.path.join(BASE_DIR, "config.json.example")
-USER_ID_FILE_PATH = os.path.join(BASE_DIR, "user_id_list.txt")
+BASE_DIR = os.path.split(os.path.realpath(__file__))[0]
+CONFIG_PATH, EXAMPLE_CONFIG_PATH = config_paths.config_files(BASE_DIR)
+USER_ID_FILE_PATH = config_paths.resolve_config_file(BASE_DIR, "user_id_list.txt")
 LOG_DIR = os.path.join(BASE_DIR, "log")
 
 if not os.path.isdir(LOG_DIR):
     os.makedirs(LOG_DIR)
 
-logging_conf = os.path.join(BASE_DIR, "logging.conf")
+logging_conf = config_paths.resolve_config_file(BASE_DIR, "logging.conf")
 if os.path.isfile(logging_conf):
     try:
         logging.config.fileConfig(logging_conf)
