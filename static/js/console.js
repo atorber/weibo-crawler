@@ -1878,6 +1878,26 @@ async function fetchPublishStatus() {
   }
 }
 
+function proxyWeiboImageUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url) return '';
+  if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('/api/')) {
+    return url;
+  }
+  const normalized = url.startsWith('//') ? `https:${url}` : url;
+  return `/api/publish/image_proxy?url=${encodeURIComponent(normalized)}`;
+}
+
+function revokePublishLocalPreviews(pics) {
+  (pics || []).forEach(p => {
+    if (p && p.local_preview_url && String(p.local_preview_url).startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(p.local_preview_url);
+      } catch (_) {}
+    }
+  });
+}
+
 function renderPublishPicGrid() {
   const grid = document.getElementById('publish-pic-grid');
   const countEl = document.getElementById('publish-pic-count');
@@ -1891,7 +1911,7 @@ function renderPublishPicGrid() {
 
   grid.innerHTML = state.publishPics.map((p, idx) => `
     <div class="publish-pic-card">
-      <img src="${escapeHtml(p.preview_url || '')}" alt="配图 ${idx + 1}">
+      <img src="${escapeHtml(p.local_preview_url || proxyWeiboImageUrl(p.preview_url || ''))}" alt="配图 ${idx + 1}">
       <button type="button" class="publish-pic-remove" data-index="${idx}" title="移除图片">✕</button>
     </div>
   `).join('');
@@ -1900,7 +1920,8 @@ function renderPublishPicGrid() {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-index'), 10);
       if (!Number.isNaN(idx)) {
-        state.publishPics.splice(idx, 1);
+        const [removed] = state.publishPics.splice(idx, 1);
+        if (removed) revokePublishLocalPreviews([removed]);
         renderPublishPicGrid();
       }
     });
@@ -1952,7 +1973,11 @@ async function fetchPublishPosts() {
       const isDeleted = !!item.deleted;
       const isScheduled = !!item.scheduled && !item.mblogid;
       const picsHtml = (item.pics && item.pics.length)
-        ? `<div class="publish-post-thumbs">${item.pics.slice(0, 9).map(p => `<img src="${escapeHtml(p.url || p.preview_url || '')}" alt="">`).join('')}</div>`
+        ? `<div class="publish-post-thumbs">${item.pics.slice(0, 9).map(p => {
+            const thumbSrc = proxyWeiboImageUrl(p.url || p.preview_url || '');
+            const largeHref = proxyWeiboImageUrl(p.large_url || p.url || p.preview_url || '');
+            return `<a href="${escapeHtml(largeHref)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(thumbSrc)}" alt="" loading="lazy"></a>`;
+          }).join('')}</div>`
         : '';
       const optionsHtml = visChoices.map(v => `<option value="${v.value}"${v.value === visVal ? ' selected' : ''}>${v.label}</option>`).join('');
 
@@ -2167,7 +2192,10 @@ function initPublishCenter() {
           const res = await fetch('/api/publish/upload_image', { method: 'POST', body: fd });
           const json = await res.json();
           if (json.code === 200 && json.success && json.data) {
-            state.publishPics.push(json.data);
+            state.publishPics.push({
+              ...json.data,
+              local_preview_url: URL.createObjectURL(file)
+            });
             renderPublishPicGrid();
           } else {
             showToast(json.message || `图片 ${file.name} 上传失败`, 'error');
@@ -2228,6 +2256,7 @@ function initPublishCenter() {
             contentEl.value = '';
             contentEl.dispatchEvent(new Event('input'));
           }
+          revokePublishLocalPreviews(state.publishPics);
           state.publishPics = [];
           renderPublishPicGrid();
           state.publishPostsPage = 1;

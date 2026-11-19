@@ -6,7 +6,7 @@ Weibo Crawler 提供了两种便捷的运行模式：**现代化 Web 可视化�
 
 ## 1. 下载源码与环境准备
 
-在开始之前，确保本地已安装 Python 3.8 或更高版本。
+在开始之前，确保本地已安装 Python 3.10 或更高版本。
 
 ```bash
 # 1. 克隆代码仓库
@@ -40,10 +40,14 @@ start.bat
 
 # 或手动通过 Python 启动
 python service.py
+
+# 或使用 PM2 生产常驻守护启动（自动探测 .venv/venv，监听 0.0.0.0:15001，500M 内存上限重启）
+pm2 start ecosystem.config.js
 ```
 
 终端将打印本地访问地址，在浏览器中打开：
-👉 [http://127.0.0.1:15001](http://127.0.0.1:15001)
+- 控制台总览：[http://127.0.0.1:15001](http://127.0.0.1:15001)
+- 发布与博文管理：[http://127.0.0.1:15001/publish](http://127.0.0.1:15001/publish)（需要 `weibo.com` 个人登录态 Cookie，详情请参阅 [微博发布与博文管理](/guide/publish)）
 
 ### 2. 控制台功能与界面概览
 
@@ -80,13 +84,15 @@ python service.py
 
 ### 1. 复制并调整配置文件
 
-从示例模板复制出 `config.json`：
+默认配置目录已统一规范至 `config/` 下，从示例模板复制出 `config/config.json`（同时向后兼容项目根目录的旧版 `config.json` 与 `user_id_list.txt`）：
 
 ```bash
-cp config.json.example config.json
+cp config/config.json.example config/config.json
+# 若需要从文本文件维护目标博主队列，可同时复制模板：
+cp config/user_id_list.txt.example config/user_id_list.txt
 ```
 
-编辑 `config.json`，填入目标用户的 `user_id_list` 及 Cookie：
+编辑 `config/config.json`，填入目标用户的 `user_id_list` 及 Cookie（注意删除示例中注释或使用标准 JSON 格式）：
 
 ```json
 {
@@ -113,12 +119,17 @@ cp config.json.example config.json
 - 详细 Cookie 说明请参阅 [Cookie 获取与验证](/guide/cookie)。
 :::
 
-### 2. 运行爬虫脚本
+### 2. 运行爬虫与环境体检脚本
 
 在终端中执行：
 
 ```bash
+# 运行爬虫采集任务
 python weibo.py
+
+# 升级后或首次部署前，可选运行配置差异体检与部署自检：
+python weibo.py --check-config
+python scripts/weibo_selfcheck.py
 ```
 
 ### 3. 查看输出成果

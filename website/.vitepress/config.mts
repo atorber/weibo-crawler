@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: 'Weibo Crawler',
-  description: '高效、稳定、开箱即用的新浪微博爬虫与数据采集平台',
+  description: '高效、稳定、开箱即用的新浪微博采集、发布与数据管理平台',
   base: '/weibo-crawler/',
   vite: {
     server: {
@@ -26,6 +26,7 @@ export default defineConfig({
       {
         text: '更多',
         items: [
+          { text: '✍️ 发布与博文管理', link: '/guide/publish' },
           { text: '🤖 Agent 技能', link: '/guide/agent-skill' },
           { text: '获取 User ID', link: '/guide/user-id' },
           { text: 'Cookie 指南', link: '/guide/cookie' },
@@ -42,7 +43,8 @@ export default defineConfig({
           items: [
             { text: '项目简介', link: '/guide/intro' },
             { text: '快速开始', link: '/guide/quick-start' },
-            { text: '输出内容与格式', link: '/guide/output' }
+            { text: '输出内容与格式', link: '/guide/output' },
+            { text: '✍️ 微博发布与博文管理', link: '/guide/publish' }
           ]
         },
         {

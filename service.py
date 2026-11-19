@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import urljoin
 
 from flask import (
     Flask,
@@ -44,7 +45,13 @@ from util.browser_cookie import (
     verify_cookie_string,
 )
 from util.config import config_paths
-from util.publish.weibo_publisher import VISIBLE_OPTIONS, WeiboPublisher
+from util.publish.weibo_publisher import (
+    DEFAULT_USER_AGENT,
+    VISIBLE_OPTIONS,
+    WeiboPublisher,
+    is_allowed_weibo_image_url,
+    normalize_weibo_image_url,
+)
 from weibo import get_config as get_weibo_config, handle_config_renaming
 
 BASE_DIR = os.path.split(os.path.realpath(__file__))[0]
@@ -1733,6 +1740,77 @@ def api_publish_posts():
                 "remote_error": remote_error,
             },
         }
+    )
+
+
+@app.route("/api/publish/image_proxy", methods=["GET"])
+def api_publish_image_proxy():
+    target_url = normalize_weibo_image_url(request.args.get("url", ""))
+    if not is_allowed_weibo_image_url(target_url):
+        return (
+            jsonify(
+                {
+                    "code": 403,
+                    "message": "仅允许代理微博官方图床域名 (*.sinaimg.cn / *.weibocdn.com)",
+                }
+            ),
+            403,
+        )
+
+    headers = {
+        "Referer": "https://weibo.com/",
+        "User-Agent": DEFAULT_USER_AGENT,
+    }
+    current_url = target_url
+    resp = None
+    try:
+        for _ in range(3):
+            resp = requests.get(
+                current_url,
+                headers=headers,
+                timeout=12,
+                allow_redirects=False,
+            )
+            if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
+                next_url = normalize_weibo_image_url(
+                    urljoin(current_url, resp.headers["Location"])
+                )
+                if not is_allowed_weibo_image_url(next_url):
+                    return (
+                        jsonify(
+                            {
+                                "code": 403,
+                                "message": "重定向目标不在允许的微博官方图床域名范围内",
+                            }
+                        ),
+                        403,
+                    )
+                current_url = next_url
+                continue
+            break
+    except requests.RequestException as exc:
+        return (
+            jsonify({"code": 502, "message": f"代理拉取微博图片失败: {exc}"}),
+            502,
+        )
+
+    if resp is None or resp.status_code != 200:
+        return Response(status=resp.status_code if resp is not None else 502)
+
+    content_type = (
+        (resp.headers.get("Content-Type") or "image/jpeg")
+        .split(";")[0]
+        .strip()
+        .lower()
+    )
+    if not content_type.startswith("image/"):
+        return jsonify({"code": 502, "message": "上游返回非图片内容"}), 502
+
+    return Response(
+        resp.content,
+        status=200,
+        mimetype=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 

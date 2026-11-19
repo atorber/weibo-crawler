@@ -45,6 +45,7 @@
   - [修改微博可见范围 (POST /api/publish/visibility)](#86-修改微博可见范围)
   - [删除微博 (POST /api/publish/delete)](#87-删除微博)
   - [查询个人/控制台发布列表 (GET /api/publish/posts)](#88-查询个人控制台发布列表)
+  - [微博图床防盗链图片代理 (GET /api/publish/image_proxy)](#89-微博图床防盗链图片代理)
 - [9. 兼容旧版端点 (Legacy API)](#9-兼容旧版端点-legacy-api)
   - [异步刷新数据 (POST /refresh)](#91-异步刷新数据)
   - [查询任务状态 (GET /task/\<task_id\>)](#92-查询任务状态)
@@ -105,6 +106,7 @@ python service.py --port 15001 --host 0.0.0.0
 | | `POST` | `/api/publish/visibility` | 修改指定微博的可见范围（`0/1/5/6/10`） |
 | | `POST` | `/api/publish/delete` | 删除指定 `mid` 的微博 |
 | | `GET` | `/api/publish/posts` | 拉取当前账号远端微博列表与本地控制台发布历史 |
+| | `GET` | `/api/publish/image_proxy` | 携带微博 `Referer` 代理拉取官方图床图片（防盗链兼容） |
 | **兼容旧版** | `POST` | `/refresh` | 触发采集任务（返回 202/409，带 task_id） |
 | | `GET` | `/task/<task_id>` | 查询指定 task_id 的进度与状态 |
 | | `GET` | `/weibos` | 获取最近 100 条抓取微博记录 |
@@ -735,6 +737,13 @@ python service.py --port 15001 --host 0.0.0.0
 - **Query 参数**:
   - `source`: `remote`（实时拉取个人主页微博，失败自动回退本地记录）或 `local`（仅查本地 `log/publish_history.json`）
   - `page`: 页码（默认 `1`）
+
+### 8.9 微博图床防盗链图片代理
+
+- **URL**: `/api/publish/image_proxy`
+- **Method**: `GET`
+- **Query 参数**:
+  - `url`: 仅限微博官方图床域名（`*.sinaimg.cn` / `*.weibocdn.com`），自动携带 `Referer: https://weibo.com/` 拉取图片流并做域名白名单与重定向 SSRF 校验。
 
 ---
 

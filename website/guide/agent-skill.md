@@ -4,6 +4,7 @@
 
 通过该 Skill，AI Agent 可以理解微博爬虫的生命周期，通过标准化 CLI 工具或 REST API 自主执行：
 - 🔍 **多维数据检索**：按博主、日期起止、正文关键词模糊搜索或互动排序抓取的微博；
+- ✍️ **微博发布与博文管理**：检查发博登录态、发布图文/定时微博、调整可见范围、`checkCanEdit` 编辑与删除；
 - 🎮 **爬取任务编排**：动态添加/移除博主、触发增量抓取、终止或重启服务；
 - 📊 **状态与日志监控**：监控爬虫进程健康状态、统计指标、排查反爬日志；
 - 🔑 **凭据自动维护**：诊断 Cookie 状态并从本地浏览器自动提取更新。
@@ -71,10 +72,10 @@ python .agents/skills/weibo-viewer/scripts/weibo_ctl.py status
 
 ## 🛠️ CLI 辅助工具：`weibo_ctl.py`
 
-Agent 通常通过调用命令行工具 [weibo_ctl.py](file:///Users/luyuchao/Documents/GitHub/weibo-crawler/skills/weibo-viewer/scripts/weibo_ctl.py) 来完成各类复杂操作。
+Agent 通常通过调用命令行工具 [skills/weibo-viewer/scripts/weibo_ctl.py](https://github.com/atorber/weibo-crawler/blob/master/skills/weibo-viewer/scripts/weibo_ctl.py) 来完成各类复杂操作。
 
 > [!TIP] 双通道高可用架构
-> `weibo_ctl.py` 优先通过 HTTP API（`http://127.0.0.1:15001/api/...`）与运行中的控制台服务通信；若 Web 控制台处于休眠或离线状态，脚本会**自动回退直接连接本地 SQLite 数据库（`weibodata.db`）**与本地文件，确保查询 100% 始终可用。
+> `weibo_ctl.py` 优先通过 HTTP API（`http://127.0.0.1:15001/api/...`）与运行中的控制台服务通信；若 Web 控制台处于休眠或离线状态，脚本会**自动回退直接连接本地 SQLite 数据库（`weibodata.db`）、配置文件或直调 `WeiboPublisher`**，确保核心能力 100% 始终可用。
 
 所有子命令均支持 `--json` 参数，以便 Agent 直接获取结构化 JSON 并无缝进行下文解析与推断。
 
@@ -206,6 +207,35 @@ python skills/weibo-viewer/scripts/weibo_ctl.py cookie --extract --browser chrom
 
 ---
 
+### 7. 微博发布与博文管理 (`publish`)
+
+同样支持**在线 API 优先 + 离线直调 `WeiboPublisher` 回退**双通道，需要 `weibo.com` 个人登录态（含 `SUB` 与 `XSRF-TOKEN`）。
+
+> [!WARNING] 安全确认门控
+> 让 AI Agent 执行**公开发布（`--visible 0`）**、**编辑（`edit`）** 或 **删除（`delete`）** 操作前，应要求 Agent 先向你二次确认准确正文内容、可见范围与目标微博 `mid`；调试或测试请优先使用 `--visible 1`（仅自己可见）或 `--dry-run`。
+
+可见性枚举（`--visible`）：`0` = 公开、`1` = 仅自己可见、`6` = 好友圈、`10` = 粉丝可见、`5` = 群可见。
+
+```bash
+# 1. 检查 weibo.com 个人发博登录态与 XSRF-TOKEN 状态
+python skills/weibo-viewer/scripts/weibo_ctl.py publish status
+
+# 2. 干跑预检或发布图文微博（最多 18 张本地图片，推荐测试用 --visible 1）
+python skills/weibo-viewer/scripts/weibo_ctl.py publish post --text "测试内容 #话题#" --images a.jpg b.png --visible 1 --dry-run
+python skills/weibo-viewer/scripts/weibo_ctl.py publish post --text "测试内容" --visible 1
+
+# 3. 定时发布（--schedule 须至少晚于当前时间 10 分钟）
+python skills/weibo-viewer/scripts/weibo_ctl.py publish post --text "定时发布内容" --visible 0 --schedule "2026-11-20 09:00"
+
+# 4. 查询个人已发列表（remote 实时拉取或 local 本地记录）、改可见性、编辑与删除
+python skills/weibo-viewer/scripts/weibo_ctl.py publish list --source remote --page 1
+python skills/weibo-viewer/scripts/weibo_ctl.py publish visibility --mid 5367067832485479 --visible 0
+python skills/weibo-viewer/scripts/weibo_ctl.py publish edit --mid 5367067832485479 --text "修改后的正文"
+python skills/weibo-viewer/scripts/weibo_ctl.py publish delete --mid 5367067832485479
+```
+
+---
+
 ## 🤖 在 Agent 框架中接入使用
 
 很多传统的工具扩展需要针对不同的平台编写繁琐割裂的配置文件（如 `.cursorrules`、`CLAUDE.md`、Function Calling JSON Schema 等）。
@@ -231,8 +261,9 @@ python skills/weibo-viewer/scripts/weibo_ctl.py cookie --extract --browser chrom
    - 多维检索微博：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py query --keyword "<关键词>" --user-id "<UID>" --limit 5
    - 目标博主管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
    - 启停任务调度：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
+   - 微博发布管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py publish [status|post|list|visibility|edit|delete]
    - 运行日志与Cookie：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
-3. 运行 `status` 子命令验证安装，完成后告诉我你已就绪，随时可以按我的指令爬取微博或检索数据！
+3. 运行 `status` 子命令验证安装，完成后告诉我你已就绪，随时可以按我的指令爬取微博、发布博文或检索数据！
 ```
 :::
 
@@ -258,11 +289,15 @@ python skills/weibo-viewer/scripts/weibo_ctl.py cookie --extract --browser chrom
 > 👤 **你**：“爬虫怎么停了？帮我看看最新的日志有没有报 Cookie 过期或者被微博风控拦截。”  
 > 🤖 **Agent**：自动运行 `weibo_ctl.py logs --lines 30` 与 `cookie` 检查认证状态，给出明确的排查建议或一键从本地浏览器刷新登录态。
 
+#### ✍️ 微博发布与博文管理
+> 👤 **你**：“帮我发一条仅自己可见的微博，正文写‘今日 AI 晨报已归档’，并把 `summary.png` 作为配图。”  
+> 🤖 **Agent**：先执行 `weibo_ctl.py publish status` 确认 `weibo.com` 登录态与 `XSRF-TOKEN` 有效，再调用 `weibo_ctl.py publish post --text "今日 AI 晨报已归档" --images summary.png --visible 1`，返回已发布微博的 `mid` 与访问链接。
+
 ---
 
 ## 📑 进阶参考
 
 如需直接通过 RESTful API 进行网络交互，或进行深度 SQL 联表查询，请参阅：
 - [RESTful API 规范文档](/api/endpoints)
-- [Database Schema 与 SQL 参考文档](file:///Users/luyuchao/Documents/GitHub/weibo-crawler/skills/weibo-viewer/references/api_reference.md)
+- [Database Schema 与 SQL 参考文档](https://github.com/atorber/weibo-crawler/blob/master/skills/weibo-viewer/references/api_reference.md)
 

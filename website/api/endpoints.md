@@ -375,9 +375,182 @@ curl -X DELETE http://127.0.0.1:15001/api/users/1669879400
 
 ---
 
-## 7. 兼容旧版端点 (Legacy API)
+## 7. 微博发布与博文管理
 
-- `POST /refresh`: 兼容旧版触发接口，返回 `202 Accepted` 或 `409 Conflict`
-- `GET /task/<task_id>`: 兼容旧版任务状态轮询
-- `GET /weibos`: 导出最新 100 条抓取微博
-- `GET /weibos/<weibo_id>`: 获取单条微博数据详情
+> 基于现网 `https://weibo.com/` (`weibo-pro-next`) 协议实现，需要 `weibo.com` 个人登录态（含 `SUB`、`XSRF-TOKEN`），不支持匿名访客 Cookie。操作指南请参阅 [微博发布与博文管理](/guide/publish)。
+
+### 可见性枚举 (`visible`)
+
+| 取值 | 含义 | 说明 |
+| :--- | :--- | :--- |
+| `0` | 公开 | 所有人可见 |
+| `1` | 仅自己可见 | 私密微博（推荐测试时使用） |
+| `6` | 好友圈 | 仅互相关注好友可见 |
+| `10` | 粉丝可见 | 仅粉丝可见 |
+| `5` | 群可见 | 粉丝群可见 |
+
+### 7.1 检查发博登录态
+
+- **URL**: `/api/publish/status`
+- **Method**: `GET`
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "data": {
+    "logged_in": true,
+    "uid": "1863732524",
+    "screen_name": "示例账号",
+    "has_xsrf": true,
+    "message": "Cookie 具备 weibo.com 发布权限（账号：示例账号）",
+    "visible_options": [
+      { "value": 0, "label": "公开" },
+      { "value": 1, "label": "仅自己可见" },
+      { "value": 6, "label": "好友圈" },
+      { "value": 10, "label": "粉丝可见" },
+      { "value": 5, "label": "群可见" }
+    ]
+  }
+}
+```
+
+### 7.2 上传微博图片
+
+- **URL**: `/api/publish/upload_image`
+- **Method**: `POST`
+- **请求方式**:
+  - `multipart/form-data`：字段名 `file`
+  - 或 `application/json`：`{"file_path": "/abs/path/to/photo.jpg"}`
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "上传成功",
+  "data": {
+    "pid": "0021x...",
+    "type": "image/jpeg",
+    "preview_url": "https://wx1.sinaimg.cn/bmiddle/0021x....jpg",
+    "large_url": "https://wx1.sinaimg.cn/large/0021x....jpg"
+  }
+}
+```
+
+### 7.3 发布 / 定时发布微博
+
+- **URL**: `/api/publish/post`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "content": "测试一条图文微博 #自动化#",
+  "visible": 1,
+  "pics": [{ "pid": "0021x...", "type": "image/jpeg" }],
+  "images": [],
+  "schedule_time": null,
+  "dry_run": false
+}
+```
+
+::: tip 定时发布与数量限制
+- 最多支持附加 18 张图片；`pics` 传已上传返回的图片对象/PID，`images` 可传本地图片绝对路径列表由后端自动上传。
+- 若提供 `schedule_time`（支持 `"YYYY-MM-DD HH:MM"` 或毫秒时间戳，且必须至少晚于当前时间 10 分钟），将自动走微博定时发布通道。
+:::
+
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "发布成功",
+  "data": {
+    "ok": true,
+    "mid": "5367067832485479",
+    "mblogid": "Rs8JVaqAn",
+    "url": "https://weibo.com/1863732524/Rs8JVaqAn",
+    "visible": 1,
+    "visible_label": "仅自己可见"
+  }
+}
+```
+
+### 7.4 检查微博是否可编辑
+
+- **URL**: ``/api/publish/can_edit/<mid>``
+- **Method**: `GET`
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "data": {
+    "ok": true,
+    "can_edit": true,
+    "mid": "5367067832485479",
+    "content": "原微博正文",
+    "msg": "当前微博可编辑"
+  }
+}
+```
+
+### 7.5 编辑微博
+
+- **URL**: `/api/publish/edit`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "mid": "5367067832485479",
+  "content": "修改后的微博正文",
+  "visible": 1,
+  "check_first": true,
+  "dry_run": false
+}
+```
+
+### 7.6 修改微博可见范围
+
+- **URL**: `/api/publish/visibility`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "mid": "5367067832485479",
+  "visible": 0
+}
+```
+
+### 7.7 删除微博
+
+- **URL**: `/api/publish/delete`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "mid": "5367067832485479"
+}
+```
+
+### 7.8 查询个人/控制台发布列表
+
+- **URL**: `/api/publish/posts`
+- **Method**: `GET`
+- **Query 参数**:
+  - `source`: `remote`（实时拉取个人主页微博，失败自动回退本地记录）或 `local`（仅查本地 `log/publish_history.json`）
+  - `page`: 页码（默认 `1`）
+
+### 7.9 微博图床防盗链图片代理
+
+- **URL**: `/api/publish/image_proxy`
+- **Method**: `GET`
+- **Query 参数**:
+  - `url`: 目标图片地址。服务端严格校验图床域名白名单（仅限 `*.sinaimg.cn` 与 `*.weibocdn.com`）并对最多 2 跳重定向复验目标主机以防止 SSRF，请求时自动附带 `Referer: https://weibo.com/` 解决新浪图床防盗链 403 问题。
+
+---
+
+## 8. 兼容旧版端点 (Legacy API)
+
+- ``POST /refresh``: 兼容旧版触发接口，返回 `202 Accepted` 或 `409 Conflict`
+- ``GET /task/<task_id>``: 兼容旧版任务状态轮询
+- ``GET /weibos``: 导出最新 100 条抓取微博
+- ``GET /weibos/<weibo_id>``: 获取单条微博数据详情

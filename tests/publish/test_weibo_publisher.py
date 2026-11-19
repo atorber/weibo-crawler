@@ -19,6 +19,8 @@ from util.publish import weibo_publisher  # noqa: E402
 from util.publish.weibo_publisher import (  # noqa: E402
     MAX_IMAGES,
     WeiboPublisher,
+    is_allowed_weibo_image_url,
+    normalize_weibo_image_url,
     parse_schedule_timestamp,
 )
 
@@ -406,6 +408,61 @@ class WeiboPublisherTest(unittest.TestCase):
         self.assertTrue(out_json["ok"])
         self.assertTrue(out_json["dry_run"])
         fake_pub.publish.assert_called_once()
+
+    def test_image_proxy_url_allowlist_and_normalization(self):
+        self.assertEqual(
+            normalize_weibo_image_url("  //wx3.sinaimg.cn/bmiddle/abc.jpg "),
+            "https://wx3.sinaimg.cn/bmiddle/abc.jpg",
+        )
+        for valid_url in (
+            "https://wx1.sinaimg.cn/bmiddle/abc.jpg",
+            "https://tvax2.sinaimg.cn/crop.0.0.100/avatar.jpg",
+            "https://f.video.weibocdn.com/foo.jpg",
+            "//wx3.sinaimg.cn/large/xyz.jpg",
+        ):
+            self.assertTrue(is_allowed_weibo_image_url(valid_url), valid_url)
+
+        for blocked_url in (
+            "",
+            "http://127.0.0.1/a.jpg",
+            "https://sinaimg.cn.evil.com/a.jpg",
+            "https://user@wx1.sinaimg.cn/a.jpg",
+            "file:///etc/passwd",
+        ):
+            self.assertFalse(is_allowed_weibo_image_url(blocked_url), blocked_url)
+
+    def test_list_my_posts_normalizes_protocol_relative_and_large_urls(self):
+        handlers = _auth_get_handlers()
+        handlers["/ajax/statuses/mymblog"] = lambda u, s, **kw: _FakeResponse(
+            {
+                "ok": 1,
+                "data": {
+                    "list": [
+                        {
+                            "idstr": "5367222",
+                            "mblogid": "NORM1",
+                            "text_raw": "图文测试",
+                            "visible": {"type": 1},
+                            "pic_ids": ["picA"],
+                            "pic_infos": {
+                                "picA": {
+                                    "bmiddle": {"url": "//wx2.sinaimg.cn/bmiddle/picA.jpg"},
+                                    "large": {"url": "//wx2.sinaimg.cn/large/picA.jpg"},
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+        sess = _FakeSession(get_handlers=handlers)
+        pub = WeiboPublisher(cookie="SUB=abc", session=sess, auto_refresh=False)
+        res = pub.list_my_posts(page=1)
+
+        self.assertTrue(res["ok"])
+        pic = res["items"][0]["pics"][0]
+        self.assertEqual(pic["url"], "https://wx2.sinaimg.cn/bmiddle/picA.jpg")
+        self.assertEqual(pic["large_url"], "https://wx2.sinaimg.cn/large/picA.jpg")
 
 
 if __name__ == "__main__":

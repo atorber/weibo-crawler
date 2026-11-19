@@ -25,6 +25,7 @@ import mimetypes
 import os
 import re
 import time
+from urllib.parse import urlparse
 import zlib
 
 try:
@@ -58,6 +59,7 @@ VISIBLE_OPTIONS: dict[int, str] = {
 MAX_IMAGES = 18
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 PLACEHOLDER_COOKIES = {"", "your cookie", "YOUR_WEIBO_COOKIE_HERE"}
+ALLOWED_IMAGE_DOMAIN_SUFFIXES = (".sinaimg.cn", ".weibocdn.com")
 
 MIME_BY_EXT: dict[str, str] = {
     ".jpg": "image/jpeg",
@@ -213,6 +215,32 @@ def parse_schedule_timestamp(schedule_time, now_ms: int | None = None) -> int:
 def _clean_form(data: dict) -> dict:
     """Drop empty strings / None while preserving integer 0 (matches weibo-pro-next cleanRequest)."""
     return {k: v for k, v in data.items() if v is not None and v != ""}
+
+
+def normalize_weibo_image_url(url: str) -> str:
+    """Normalize protocol-relative or whitespace-padded Weibo image URLs."""
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return "https:" + text
+    return text
+
+
+def is_allowed_weibo_image_url(url: str) -> bool:
+    """Allow only official Weibo image/media CDN hosts to prevent SSRF."""
+    normalized = normalize_weibo_image_url(url)
+    if not normalized:
+        return False
+    parsed = urlparse(normalized)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        return False
+    return any(host.endswith(suffix) for suffix in ALLOWED_IMAGE_DOMAIN_SUFFIXES)
 
 
 def _guess_mime(filename: str | None) -> str:
@@ -1068,11 +1096,23 @@ class WeiboPublisher:
             pics = []
             for pid in pic_ids:
                 info = pic_infos.get(pid) or {}
-                bmiddle = (info.get("bmiddle") or {}).get("url")
+                thumb_raw = (
+                    (info.get("bmiddle") or {}).get("url")
+                    or (info.get("thumbnail") or {}).get("url")
+                    or (info.get("large") or {}).get("url")
+                    or f"https://wx1.sinaimg.cn/bmiddle/{pid}.jpg"
+                )
+                large_raw = (
+                    (info.get("large") or {}).get("url")
+                    or (info.get("mw2000") or {}).get("url")
+                    or (info.get("original") or {}).get("url")
+                    or f"https://wx1.sinaimg.cn/large/{pid}.jpg"
+                )
                 pics.append(
                     {
                         "pid": pid,
-                        "url": bmiddle or f"https://wx1.sinaimg.cn/bmiddle/{pid}.jpg",
+                        "url": normalize_weibo_image_url(thumb_raw),
+                        "large_url": normalize_weibo_image_url(large_raw),
                     }
                 )
             items.append(

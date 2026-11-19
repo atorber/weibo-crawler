@@ -4,9 +4,10 @@
 
 无论你是进行商业数据分析、学术社会学研究、品牌与热点舆情监控，还是构建大模型 (LLM) 领域知识库 (RAG)，本项目都能提供稳定、友好、高可靠的一站式解决方案：
 
-- 🎯 **精准持续采集**：支持按博主 UID 全量或增量爬取正文、图文/视频、Live Photo 与互动数据；
-- 💾 **多元存储矩阵**：支持 CSV/JSON 本地落盘、SQLite 本地免配置库，以及 MySQL、MongoDB、Webhook 云端同步；
-- 🚀 **开放赋能消费**：自带现代化 Web 可视化控制台、标准 RESTful API 及 AI Agent 智能体技能，随时检索调用。
+- 🎯 **精准持续采集**：支持按博主 UID 全量或增量爬取正文、评论/回复、图文/视频、Live Photo 与互动数据；
+- ✍️ **发布与博文管理**：支持纯文本/多图（最多 18 张）/定时发布、可见范围管理（`0/1/5/6/10`）、`checkCanEdit` 编辑与删除；
+- 💾 **多元存储矩阵**：支持 CSV/JSON/Markdown 本地归档、SQLite 本地库，以及 MySQL、MongoDB、Webhook 云端同步；
+- 🚀 **开放赋能消费**：自带现代化 Web 可视化控制台、标准 RESTful API 及 AI Agent 智能体技能，随时检索与发布调用。
 
 ![Weibo Crawler 现代化 Web 控制台](/images/console-dashboard.png)
 
@@ -67,8 +68,16 @@ Weibo Crawler 采用**双引擎架构**，既可以作为轻量 CLI 脚本与定
 
 ### 6. AI Agent 技能集成 (weibo-viewer)
 - 内置开箱即用的智能体 Skill 包，赋能大语言模型（LLM）与 Agent 系统（Antigravity、Claude Code、Cursor 等）。
-- 具备双通道 CLI 调度工具与 REST API，支持 Agent 自动化启停任务、监控状态，以及对本地微博知识库进行高精度的关键词检索与舆情摘要。详情请参阅 [AI Agent 技能指南](/guide/agent-skill)。
+- 具备双通道 CLI 调度工具与 REST API，支持 Agent 自动化启停任务、监控状态、对本地微博知识库进行高精度的关键词检索与舆情摘要，以及触发微博发布与博文管理。详情请参阅 [AI Agent 技能指南](/guide/agent-skill)。
 - **规范相对路径**：所有媒体资源默认按模块英文相对路径分类管理（`img/`、`video/`、`live_photo/`），防止跨平台中文乱码。
+
+### 7. ✍️ 微博发布与博文管理
+- 基于现网 `https://weibo.com/`（`weibo-pro-next`）协议，提供独立控制台页面 `/publish`、`/api/publish/*` REST API、`WeiboPublisher` SDK 与 Agent CLI。
+- 支持纯文本、`#话题#`、最多 18 张多图上传与定时发布（至少晚于当前 10 分钟）、可见范围控制（`0` 公开 / `1` 仅自己可见 / `6` 好友圈 / `10` 粉丝可见 / `5` 群可见）、`checkCanEdit` 预检编辑、删除及图床防盗链代理预览。详情请参阅 [微博发布与博文管理](/guide/publish)。
+
+### 8. 📋 评论归档、存档核对与健康自检
+- 支持一级评论与二级回复分页抓取、评论图片与表情下载、评论者白名单过滤及历史评论增量回填脚本（`scripts/weibo_comment_backfill.py`）。
+- 内置每轮与全量存档核对、媒体完整性检查、编辑/可见性变化报告（`weibo_change_report`）、已不可见微博隔离区保护，以及部署自检与配置体检命令（`python scripts/weibo_selfcheck.py`、`python weibo.py --check-config`）。详情请参阅 [完整配置参数](/guide/config)。
 
 ---
 
@@ -77,6 +86,6 @@ Weibo Crawler 采用**双引擎架构**，既可以作为轻量 CLI 脚本与定
 | 环境项 | 最低要求 | 推荐配置 |
 | --- | --- | --- |
 | 操作系统 | Windows / Linux / macOS | Ubuntu 22.04+ 或 macOS Sonoma / Sequoia |
-| Python 版本 | Python 3.7+ | Python 3.9 ~ 3.12 |
-| 网络连接 | 能稳定访问 `weibo.cn` / `m.weibo.cn` | 优质稳定的网络带宽或云服务器环境 |
+| Python 版本 | Python 3.10+ | Python 3.10 ~ 3.12 |
+| 网络连接 | 能稳定访问 `weibo.cn` / `m.weibo.cn` / `weibo.com` | 优质稳定的网络带宽或云服务器环境 |
 

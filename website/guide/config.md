@@ -1,6 +1,11 @@
 # 完整配置参数指南
 
-所有核心爬虫行为均通过 `config.json` 定义。系统支持在 **Web 控制台** 中进行表单化可视化配置，也可在源码视图中直接编辑 JSON。
+所有核心爬虫行为默认通过 `config/config.json` 定义（可从模板 `config/config.json.example` 复制生成，同时向后兼容项目根目录旧版 `config.json`）。系统支持在 **Web 控制台** 中进行表单化可视化配置，也可在源码视图中直接编辑 JSON。
+
+::: tip Cookie 优先级与文件路径约定
+- Cookie 支持直接写在配置项 `"cookie"` 中，或填为文件路径（如 `"config/cookie.txt"`）；
+- 若设置了环境变量 `WEIBO_COOKIE`，将作为最高优先级覆盖配置文件中的 Cookie。
+:::
 
 <div style="border-radius: 8px; overflow: hidden; margin: 18px 0; border: 1px solid var(--vp-c-divider);">
   <img src="/images/console-settings.png" alt="参数配置控制台" style="width: 100%; display: block;" />
@@ -93,9 +98,16 @@
 | 参数名 | 类型 | 默认值 | 详细说明 |
 | --- | --- | --- | --- |
 | `write_mode` | `list` | `["csv"]` | 数据落盘格式列表，可任意组合：`"csv"`、`"json"`、`"sqlite"`、`"mysql"`、`"mongo"`、`"markdown"`、`"post"`。 |
+| `output_directory` | `str` | `"weibo_data"` | 数据与媒体输出根目录，支持相对项目根路径或绝对路径。 |
 | `user_id_as_folder_name` | `int` | `0` | 存储目录命名方式。`0` 为使用用户昵称（如 `Dear-迪丽热巴/`）；`1` 为使用纯数字 ID。 |
-| `download_folder_name` | `dict` | 见详情 | 本地各类媒体文件（图片/视频/实况）存放的相对子目录，推荐使用默认英文相对路径 `img`、`video`、`live_photo`。 |
-| `markdown_file_dir` | `dict` | 见详情 | 生成 Markdown 时内部相对链接引用的媒体子目录，默认与下载目录保持一致。 |
+| `markdown_split_by` | `str` | `"day_by_month"` | Markdown 归档分割粒度：`"day"`（按天）、`"day_by_month"`（按天+按月归档）、`"month"`（按月）、`"year"`（按年）、`"all"`（全部单文件）。 |
+| `markdown_sort_order` | `str` | `"new_to_old"` | Markdown 内微博排序方向：`"new_to_old"`（新→旧）或 `"old_to_new"`（旧→新）。 |
+| `timestamp_prefix_format` | `str` | `"%Y-%m-%d_%H-%M-%S"` | 媒体文件时间前缀格式（例如改为 `"%Y%m%d_%H%M%S"` 可去掉时间中的横线）。 |
+| `timestamp_prefix_include_id` | `int` | `0` | 是否在时间前缀后追加 `_微博ID`：`0` 不追加，`1` 追加。 |
+| `not_downloaded_record` | `int` | `0` | 是否记录下载失败清单（下载成功后自动清理）：`0` 不记录，`1` 记录。 |
+| `download_folder_name` | `dict` | 见详情 | 本地各类媒体文件（图片/视频/实况/评论图片）存放的子目录配置。 |
+| `markdown_file_dir` | `dict` | 见详情 | 生成 Markdown 时内部相对链接引用的媒体子目录配置。 |
+| `sqlite_db_path` | `str` | `"weibodata.db"` | 当 `write_mode` 含 `"sqlite"` 时的数据库文件路径。 |
 | `mysql_config` | `dict` | 见详情 | MySQL 数据库连接配置（含 `host`, `port`, `user`, `password`, `charset`）。 |
 | `mongodb_URI` | `str` | `""` | MongoDB 标准连接 URI，例如 `mongodb://root:pass@localhost:27017/weibo?authSource=admin`。 |
 | `store_binary_in_sqlite`| `int` | `0` | 是否在 SQLite 数据库内直接存储图片与视频的二进制 BLOB 原始数据（`0` 关，`1` 开）。 |
@@ -159,5 +171,49 @@
 | --- | --- | --- | --- |
 | `enabled` | `bool` | `false` | 是否开启持续监听模式。开启后每轮爬完自动等待指定间隔并拉起下一轮增量巡检。 |
 | `interval_minutes` | `int` | `30` | 两轮增量巡检之间的休眠等待间隔（分钟，从上一轮任务完全结束后开始倒计时，防止并发重叠）。 |
+
+---
+
+### 💬 评论与转发下载
+
+| 参数名 | 类型 | 默认值 | 详细说明 |
+| --- | --- | --- | --- |
+| `download_comment` | `int` | `0` | 是否下载微博评论（含一级评论与二级回复）：`1` 下载，`0` 不下载。 |
+| `comment_max_download_count` | `int` | `0` | 单条微博一级评论抓取上限（条），`0` 表示不限制。 |
+| `comment_reply_max_download_count` | `int` | `0` | 每条一级评论下的二级回复上限（条），`0` 表示不限制。 |
+| `comment_pic_download` | `int` | `0` | 是否下载评论配图：`1` 下载，`0` 不下载。 |
+| `comment_user_filter_file` | `str` | `"config/comment_user_filter.txt"` | 评论者白名单文件路径；也可使用 `comment_user_filter` 内联字典配置（未列出的博主不过滤）。 |
+| `comment_refresh_scope` | `str` | `"all"` | 评论刷新范围：`all`（刷新本轮抓到的已存档微博）、`recent`（仅最近 N 天）、`off`（仅刷新增微博）。 |
+| `download_repost` | `int` | `0` | 是否下载转发详情：`1` 下载，`0` 不下载。 |
+| `repost_max_download_count` | `int` | `100` | 单条微博转发记录上限（条）。 |
+
+---
+
+### 📋 报告、存档核对与不可见隔离区
+
+| 参数名 | 类型 | 默认值 | 详细说明 |
+| --- | --- | --- | --- |
+| `weibo_archive_check` | `int` | `0` | 是否生成本轮存档核对报告（需 `write_mode` 含 `"markdown"`）：`1` 生成，`0` 不生成。 |
+| `weibo_crawl_summary` | `int` | `0` | 是否生成本轮抓取情况汇总报告（需 `write_mode` 含 `"markdown"`）。 |
+| `weibo_media_check` | `int` | `0` | 是否生成媒体完整性核对报告（需 `write_mode` 含 `"markdown"`）。 |
+| `weibo_change_report` | `int` | `1` | 是否生成微博变化审计报告（记录正文编辑、可见性改变、疑似不可见、恢复可见等变更）。 |
+| `weibo_deleted_report` | `int` | `1` | 抓取结束后是否在用户目录生成 `已删除微博.txt`。 |
+| `invisible_archive_enabled` | `int` | `1` | 不可见微博隔离区总开关：`1` 启用，`0` 关闭。 |
+| `invisible_confirm_rounds` | `int` | `2` | 连续多少轮全量巡检未抓到时判定为「疑似不可见」。 |
+| `invisible_archive_dir` | `str` | `"已不可见"` | 隔离区目录名（相对用户目录）或绝对路径。 |
+
+::: tip 常用配置体检与维护脚本
+```bash
+# 预览配置差异与迁移检查（不修改文件）；如需自动补全并备份可执行 --update-config
+python weibo.py --check-config
+
+# 部署后一键环境与模块自检（含导入检查与配置键提示）
+python scripts/weibo_selfcheck.py
+
+# 按需运行全量存档核对或历史评论回填（需配置项对应开启）
+python scripts/weibo_archive_check_full.py
+python scripts/weibo_comment_backfill.py
+```
+:::
 
 

@@ -29,24 +29,28 @@ features:
   - icon: 🖥️
     title: 现代 Web 可视化控制台
     details: 内置轻量响应式 Web 控制台，支持目标队列维护、参数可视化调控、实时图表大屏与日志流排查。
+  - icon: ✍️
+    title: 微博发布与博文管理
+    details: 支持纯文本、最多 18 张多图发布与定时发博，支持可见性控制（0/1/5/6/10）、checkCanEdit 预检编辑、删除、个人主页实时时间线与防盗链安全代理预览。
+    link: /guide/publish
   - icon: 🤖
     title: AI Agent 技能 (weibo-viewer)
-    details: 内置标准化 Agent 扩展包，支持大模型智能体自主调度爬虫、按关键词多维搜索与分析微博数据。
+    details: 内置标准化 Agent 扩展包，支持大模型智能体自主调度爬虫、按关键词多维搜索与发布/管理微博。
   - icon: 🔑
     title: 浏览器 Cookie 免密读取与热恢复
     details: 一键探测提取 Chrome、Edge、Firefox、Safari 本地登录态，支持后台定时更新及 403/过期自动热替换无缝重试。
   - icon: 🛡️
     title: 智能反封禁与限频引擎
-    details: 内置自适应请求频率限制、会话最大爬取上限、错误熔断与动态拟人随机休眠保护。
+    details: 内置自适应请求频率限制、会话最大爬取上限、错误熔断、动态拟人休眠及存档核对与变化审计报告。
   - icon: 💾
-    title: 丰富输出与连通性测试
-    details: 独立数据存储配置，支持 CSV、JSON、SQLite、MySQL、MongoDB、Webhook 与 Markdown，自带一键连通性测试。
+    title: 丰富输出与评论归档
+    details: 支持 CSV、JSON、SQLite、MySQL、MongoDB、Webhook 与 Markdown，完整采集一级评论与二级回复并内置连通性测试。
   - icon: 📸
     title: 原图/视频/实况下载
     details: 支持无损大图、高清 MP4 视频、Live Photo 动态视频提取及拍摄时间 EXIF 自动回写。
   - icon: ⏰
-    title: 持续监听与 Docker 部署
-    details: 内置 7×24 小时定时增量巡检调度器，每轮爬完自动记录最新微博时间并倒计时拉起下一轮；提供标准 Docker 镜像。
+    title: 持续监听、PM2 与 Docker 部署
+    details: 内置 7×24 小时定时增量巡检调度器；提供 ecosystem.config.js 一键 PM2 常驻守护与标准 Docker 部署方案。
 ---
 
 <div class="vp-doc" style="margin-top: 3.5rem;">
@@ -74,15 +78,18 @@ cd weibo-crawler
 # 2. 一键启动（自动检查/安装依赖、初始化配置并打开 http://127.0.0.1:15001）
 ./start.sh          # macOS / Linux
 start.bat           # Windows（支持直接双击运行）
+
+# 或使用 PM2 后台常驻运行 Web 控制台
+pm2 start ecosystem.config.js
 ```
 
 ```bash [命令行直接运行]
-# 1. 复制配置文件
-cp config.json.example config.json
+# 1. 复制配置文件到 config/ 目录（同时向后兼容根目录 config.json）
+cp config/config.json.example config/config.json
 
-# 2. 填写 config.json 中的 cookie 和 user_id_list
+# 2. 填写 config/config.json 中的 cookie 和 user_id_list
 
-# 3. 运行爬虫
+# 3. 运行爬虫（可先执行 --check-config 检查配置差异）
 python weibo.py
 ```
 
