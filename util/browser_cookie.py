@@ -192,8 +192,14 @@ def verify_cookie_string(cookie_str):
     }
 
 
-def extract_browser_cookies(browser_name="auto"):
-    """通过 rookiepy 从本地浏览器自动提取微博 Cookie."""
+def extract_browser_cookies(browser_name="auto", prefer_domain=None):
+    """通过 rookiepy 从本地浏览器自动提取微博 Cookie.
+
+    Args:
+        browser_name: 浏览器标识或 ``"auto"``.
+        prefer_domain: 同名 Cookie 冲突时的优先域（默认 ``"weibo.cn"`` 优先以兼容爬虫；
+            发布场景可传 ``"weibo.com"`` 使 ``weibo.com`` 域 Cookie 覆盖同名键）。
+    """
     try:
         import rookiepy
     except ImportError:
@@ -231,10 +237,16 @@ def extract_browser_cookies(browser_name="auto"):
                 dom = c.get("domain", "")
                 if "visitor" in dom:
                     return 0
-                if dom.endswith("weibo.com"):
-                    return 1
-                if dom.endswith("weibo.cn"):
-                    return 2
+                if prefer_domain == "weibo.com":
+                    if dom.endswith("weibo.cn"):
+                        return 1
+                    if dom.endswith("weibo.com"):
+                        return 2
+                else:
+                    if dom.endswith("weibo.com"):
+                        return 1
+                    if dom.endswith("weibo.cn"):
+                        return 2
                 return 0
 
             sorted_cookies = sorted(raw_cookies, key=priority)
@@ -318,11 +330,17 @@ def extract_browser_cookies(browser_name="auto"):
     return None, msg, None
 
 
-def extract_and_save_cookie(browser_name="auto", cookie_file_path=None):
+def extract_and_save_cookie(
+    browser_name="auto",
+    cookie_file_path=None,
+    prefer_domain=None,
+    browser=None,
+):
     """Extracts cookie from browser, verifies it, and persists to config.json (and optional cookie_file_path).
 
     Returns:
         dict: {
+            "ok": bool,
             "success": bool,
             "cookie": str or None,
             "browser": str or None,
@@ -332,15 +350,17 @@ def extract_and_save_cookie(browser_name="auto", cookie_file_path=None):
             "timestamp": str
         }
     """
+    target_browser = browser if browser is not None else browser_name
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cookie_str, err_msg, detected_browser = extract_browser_cookies(
-        browser_name
+        target_browser, prefer_domain=prefer_domain
     )
     if err_msg or not cookie_str:
         return {
+            "ok": False,
             "success": False,
             "cookie": None,
-            "browser": detected_browser or browser_name,
+            "browser": detected_browser or target_browser,
             "valid": False,
             "user": {},
             "message": err_msg or "未能从浏览器提取到有效微博 Cookie",
@@ -376,13 +396,14 @@ def extract_and_save_cookie(browser_name="auto", cookie_file_path=None):
             logger.error(f"自动保存提取的 Cookie 到配置文件失败: {e}")
 
     return {
+        "ok": bool(valid),
         "success": True,
         "cookie": cookie_str,
-        "browser": detected_browser or browser_name,
+        "browser": detected_browser or target_browser,
         "valid": valid,
         "user": check_result.get("user", {}),
         "message": (
-            f"成功从 {detected_browser or browser_name} 提取微博 Cookie！"
+            f"成功从 {detected_browser or target_browser} 提取微博 Cookie！"
             + (
                 f" {check_result.get('message', '')}"
                 if check_result.get("message")

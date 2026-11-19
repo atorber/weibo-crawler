@@ -29,6 +29,14 @@ Default Base URL: `http://127.0.0.1:15001` (can be configured via `WEIBO_API_BAS
 | `POST` | `/api/test/mysql` | Test MySQL database connection | Host, port, user, password, db_name |
 | `POST` | `/api/test/mongodb` | Test MongoDB connection | Host, port, user, password, db_name |
 | `POST` | `/api/test/webhook` | Test Webhook notification trigger | `{"type": "wecom", "url": "..."}` |
+| `GET` | `/api/publish/status` | Check `weibo.com` publishing auth & XSRF state | None |
+| `POST` | `/api/publish/upload_image` | Upload image to Weibo CDN | Multipart `file` or `{"file_path": "..."}` |
+| `POST` | `/api/publish/post` | Publish or schedule a Weibo post | `content`, `visible`, `pics`/`images`, `schedule_time`, `dry_run` |
+| `GET` | `/api/publish/can_edit/<mid>` | Check if a post can be edited | None |
+| `POST` | `/api/publish/edit` | Edit an existing Weibo post | `mid`, `content`, `visible`, `check_first`, `dry_run` |
+| `POST` | `/api/publish/visibility` | Change post visibility (`0/1/5/6/10`) | `{"mid": "...", "visible": 1}` |
+| `POST` | `/api/publish/delete` | Delete a Weibo post | `{"mid": "..."}` |
+| `GET` | `/api/publish/posts` | List own remote posts & local publish history | `source=remote\|local`, `page=1` |
 
 ---
 

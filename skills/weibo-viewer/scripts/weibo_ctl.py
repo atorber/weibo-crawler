@@ -328,6 +328,222 @@ def cmd_cookie(args):
             print(f"Status check failed: {res.get('msg')}")
 
 
+def _load_offline_publisher():
+    """Import WeiboPublisher locally when console service is offline."""
+    if WORKSPACE_ROOT not in sys.path:
+        sys.path.insert(0, WORKSPACE_ROOT)
+    from util.publish.weibo_publisher import WeiboPublisher
+
+    return WeiboPublisher(project_root=WORKSPACE_ROOT)
+
+
+def _print_publish_output(res_data, ok, message, as_json=False, extra_lines=None):
+    if as_json:
+        print(json.dumps(res_data, indent=2, ensure_ascii=False))
+        return
+    if ok:
+        print(f"✅ {message}")
+        for line in extra_lines or []:
+            print(line)
+    else:
+        print(f"❌ {message}")
+
+
+def cmd_publish(args):
+    """Publish or manage Weibo posts (online API first, offline WeiboPublisher fallback)."""
+    action = args.action
+    as_json = getattr(args, "json", False)
+
+    if action == "status":
+        res = http_request("/api/publish/status", timeout=15)
+        if res.get("code") == -1:
+            pub = _load_offline_publisher()
+            d = pub.ensure_session()
+            ok = bool(d.get("logged_in"))
+            _print_publish_output(
+                d,
+                ok,
+                d.get("message") or ("已就绪" if ok else "未登录"),
+                as_json=as_json,
+                extra_lines=[f"UID: {d.get('uid') or 'N/A'} | Screen Name: {d.get('screen_name') or 'N/A'}"],
+            )
+            if not ok:
+                sys.exit(1)
+            return
+        d = res.get("data", {})
+        ok = res.get("code") == 200 and bool(d.get("logged_in"))
+        _print_publish_output(
+            res,
+            ok,
+            d.get("message") or res.get("msg") or "",
+            as_json=as_json,
+            extra_lines=[f"UID: {d.get('uid') or 'N/A'} | Screen Name: {d.get('screen_name') or 'N/A'}"],
+        )
+        if not ok:
+            sys.exit(1)
+        return
+
+    if action == "post":
+        vis = 0 if args.visible is None else args.visible
+        images = [os.path.abspath(p) for p in (args.images or [])]
+        payload = {
+            "content": args.text or "",
+            "visible": vis,
+            "images": images,
+            "schedule_time": args.schedule,
+            "topic_id": args.topic_id,
+            "dry_run": bool(args.dry_run),
+        }
+        res = http_request("/api/publish/post", method="POST", payload=payload, timeout=60)
+        if res.get("code") == -1:
+            pub = _load_offline_publisher()
+            d = pub.publish(**payload)
+            ok = bool(d.get("ok"))
+            _print_publish_output(
+                d,
+                ok,
+                d.get("msg") or ("发布成功" if ok else "发布失败"),
+                as_json=as_json,
+                extra_lines=[
+                    f"MID: {d.get('mid') or 'N/A'} | Visible: {d.get('visible_label', vis)}",
+                    f"URL: {d.get('url') or 'N/A'}",
+                ] if ok and not args.dry_run else [],
+            )
+            if not ok:
+                sys.exit(1)
+            return
+        ok = res.get("code") == 200 and bool(res.get("success"))
+        d = res.get("data", {})
+        _print_publish_output(
+            res,
+            ok,
+            res.get("message") or res.get("msg") or "",
+            as_json=as_json,
+            extra_lines=[
+                f"MID: {d.get('mid') or 'N/A'} | Visible: {d.get('visible_label', vis)}",
+                f"URL: {d.get('url') or 'N/A'}",
+            ] if ok and not args.dry_run else [],
+        )
+        if not ok:
+            sys.exit(1)
+        return
+
+    if action == "edit":
+        if not args.mid:
+            print("❌ --mid is required for 'edit'")
+            sys.exit(1)
+        images = [os.path.abspath(p) for p in (args.images or [])]
+        payload = {
+            "mid": args.mid,
+            "content": args.text or "",
+            "visible": args.visible,
+            "images": images,
+            "check_first": not args.no_check,
+            "dry_run": bool(args.dry_run),
+        }
+        res = http_request("/api/publish/edit", method="POST", payload=payload, timeout=60)
+        if res.get("code") == -1:
+            pub = _load_offline_publisher()
+            d = pub.edit(**payload)
+            ok = bool(d.get("ok"))
+            _print_publish_output(
+                d,
+                ok,
+                d.get("msg") or ("编辑成功" if ok else "编辑失败"),
+                as_json=as_json,
+            )
+            if not ok:
+                sys.exit(1)
+            return
+        ok = res.get("code") == 200 and bool(res.get("success"))
+        _print_publish_output(res, ok, res.get("message") or res.get("msg") or "", as_json=as_json)
+        if not ok:
+            sys.exit(1)
+        return
+
+    if action == "visibility":
+        if not args.mid or args.visible is None:
+            print("❌ Both --mid and --visible are required for 'visibility'")
+            sys.exit(1)
+        payload = {"mid": args.mid, "visible": args.visible}
+        res = http_request("/api/publish/visibility", method="POST", payload=payload, timeout=15)
+        if res.get("code") == -1:
+            pub = _load_offline_publisher()
+            d = pub.modify_visibility(args.mid, args.visible)
+            ok = bool(d.get("ok"))
+            _print_publish_output(
+                d,
+                ok,
+                d.get("msg") or ("修改成功" if ok else "修改失败"),
+                as_json=as_json,
+            )
+            if not ok:
+                sys.exit(1)
+            return
+        ok = res.get("code") == 200 and bool(res.get("success"))
+        _print_publish_output(res, ok, res.get("message") or res.get("msg") or "", as_json=as_json)
+        if not ok:
+            sys.exit(1)
+        return
+
+    if action == "delete":
+        if not args.mid:
+            print("❌ --mid is required for 'delete'")
+            sys.exit(1)
+        payload = {"mid": args.mid}
+        res = http_request("/api/publish/delete", method="POST", payload=payload, timeout=15)
+        if res.get("code") == -1:
+            pub = _load_offline_publisher()
+            d = pub.delete(args.mid)
+            ok = bool(d.get("ok"))
+            _print_publish_output(
+                d,
+                ok,
+                d.get("msg") or ("删除成功" if ok else "删除失败"),
+                as_json=as_json,
+            )
+            if not ok:
+                sys.exit(1)
+            return
+        ok = res.get("code") == 200 and bool(res.get("success"))
+        _print_publish_output(res, ok, res.get("message") or res.get("msg") or "", as_json=as_json)
+        if not ok:
+            sys.exit(1)
+        return
+
+    if action == "list":
+        qs = urllib.parse.urlencode({"source": args.source, "page": args.page})
+        res = http_request(f"/api/publish/posts?{qs}", timeout=15)
+        if res.get("code") == -1:
+            pub = _load_offline_publisher()
+            d = pub.list_my_posts(page=args.page) if args.source != "local" else {"ok": False, "items": [], "msg": "服务离线且未启用远端拉取"}
+            if as_json:
+                print(json.dumps(d, indent=2, ensure_ascii=False))
+                if not d.get("ok"):
+                    sys.exit(1)
+                return
+            if not d.get("ok"):
+                print(f"❌ {d.get('msg')}")
+                sys.exit(1)
+            items = d.get("items") or []
+        else:
+            d = res.get("data", {})
+            if as_json:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+                return
+            if d.get("remote_error"):
+                print(f"⚠️  {d['remote_error']}")
+            items = d.get("items") or []
+
+        if not items:
+            print("No posts found.")
+            return
+        for it in items:
+            vis_label = it.get("visible_label") or it.get("visible_type")
+            snippet = (it.get("text_raw") or "").replace("\n", " ")[:90]
+            print(f"[{it.get('mid')}] ({vis_label}) {it.get('created_at', '')} | {snippet}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Weibo Crawler & Data Viewer CLI Helper",
@@ -377,6 +593,21 @@ def main():
     p_cookie.add_argument("--extract", action="store_true", help="Extract cookie from browser")
     p_cookie.add_argument("--browser", choices=["chrome", "edge", "firefox", "brave", "safari"], default="chrome")
 
+    # Publish & Post Management
+    p_pub = subparsers.add_parser("publish", help="Publish, edit, delete, or change visibility of Weibo posts")
+    p_pub.add_argument("action", choices=["status", "post", "edit", "visibility", "delete", "list"], default="status", nargs="?")
+    p_pub.add_argument("--text", "-t", type=str, help="Post text content")
+    p_pub.add_argument("--images", "-i", nargs="+", help="Local image file path(s) to upload and attach")
+    p_pub.add_argument("--visible", "-v", type=int, choices=[0, 1, 5, 6, 10], default=None, help="Visibility: 0=public, 1=self, 6=friends, 10=fans, 5=group")
+    p_pub.add_argument("--schedule", type=str, help="Schedule publish time (YYYY-MM-DD HH:MM, >=10 min ahead)")
+    p_pub.add_argument("--topic-id", type=str, help="Optional Chaohua/topic ID")
+    p_pub.add_argument("--mid", type=str, help="Target post mid (for edit, visibility, delete)")
+    p_pub.add_argument("--no-check", action="store_true", help="Skip checkCanEdit preflight before editing")
+    p_pub.add_argument("--dry-run", action="store_true", help="Validate parameters without sending post/edit request")
+    p_pub.add_argument("--source", choices=["remote", "local"], default="remote", help="Post list source")
+    p_pub.add_argument("--page", type=int, default=1, help="Timeline page number (for list)")
+    p_pub.add_argument("--json", action="store_true", help="Output raw JSON")
+
     args = parser.parse_args()
     if not args.subcommand:
         parser.print_help()
@@ -390,7 +621,8 @@ def main():
         "users": cmd_users,
         "query": cmd_query,
         "logs": cmd_logs,
-        "cookie": cmd_cookie
+        "cookie": cmd_cookie,
+        "publish": cmd_publish,
     }
     dispatch[args.subcommand](args)
 

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Weibo Crawler 控制台 - 微博数据采集管理系统</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
-  <link rel="stylesheet" href="/static/css/console.css?v=4">
+  <link rel="stylesheet" href="/static/css/console.css?v=5">
 </head>
 
 <body>
@@ -23,6 +23,10 @@
         <li class="nav-item active" data-tab="dashboard">
           <div class="nav-icon">📊</div>
           <span>总览控制</span>
+        </li>
+        <li class="nav-item" data-tab="publish">
+          <div class="nav-icon">✍️</div>
+          <span>发布管理</span>
         </li>
         <li class="nav-item" data-tab="targets">
           <div class="nav-icon">👥</div>
@@ -263,6 +267,120 @@
           <div style="padding: 20px 24px;">
             <div id="cookie-status-banner" style="font-size: 0.9rem; color: var(--text-muted);">
               点击上方按钮开始探针校验...
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 1B: Publish & Post Management -->
+      <section class="page-view" id="view-publish">
+        <!-- Auth Status Bar -->
+        <div class="content-box" style="margin-bottom: 22px;">
+          <div class="content-box-header">
+            <div>
+              <h3 style="font-size: 1.05rem; font-weight: 700;">weibo.com 发布权限校验</h3>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">
+                发布/编辑/改可见性/删帖需要个人登录态（含 SUB 与 XSRF-TOKEN）
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary btn-sm" id="btn-publish-open-cookie">🔑 更新 Cookie</button>
+              <button class="btn btn-primary btn-sm" id="btn-publish-refresh-status">🔍 刷新登录态</button>
+            </div>
+          </div>
+          <div style="padding: 16px 24px;">
+            <div class="publish-auth-bar" id="publish-auth-banner">
+              <span id="publish-auth-text">正在检查 weibo.com 登录态...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer Card -->
+        <div class="content-box" style="margin-bottom: 24px;">
+          <div class="content-box-header">
+            <div>
+              <h3 style="font-size: 1.05rem; font-weight: 700;">✍️ 撰写与发布新微博</h3>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">
+                支持纯文字、最多 18 张多图上传、可见范围控制及 10 分钟后定时发布
+              </p>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button type="button" class="btn btn-secondary btn-sm publish-insert-chip" data-snippet="#话题# "># 插入话题</button>
+              <button type="button" class="btn btn-secondary btn-sm publish-insert-chip" data-snippet="@">@ 提及用户</button>
+            </div>
+          </div>
+          <div style="padding: 20px 24px;">
+            <div class="form-group" style="margin-bottom: 14px;">
+              <textarea class="form-control" id="publish-content" rows="5"
+                placeholder="分享新鲜事... 支持 #话题# 与 @用户名"></textarea>
+              <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.78rem; color: var(--text-dim);">
+                <span>提示：建议测试阶段先保持「仅自己可见 (1)」</span>
+                <span id="publish-char-count">0 字</span>
+              </div>
+            </div>
+
+            <!-- Images Uploader -->
+            <div style="margin-bottom: 18px;">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap;">
+                <input type="file" id="publish-image-input" multiple accept="image/*" style="display: none;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-publish-pick-images">🖼️ 上传配图</button>
+                <span style="font-size: 0.8rem; color: var(--text-muted);" id="publish-pic-count">已传 0 / 18 张</span>
+              </div>
+              <div class="publish-pic-grid" id="publish-pic-grid"></div>
+            </div>
+
+            <!-- Publish Options Row -->
+            <div class="publish-options-row">
+              <div class="publish-option-item">
+                <label class="form-label" style="margin-bottom: 6px;">可见范围 (visible)</label>
+                <select class="form-control" id="publish-visible" style="min-width: 180px;">
+                  <option value="1" selected>仅自己可见 (1)</option>
+                  <option value="0">公开 (0)</option>
+                  <option value="6">好友圈 (6)</option>
+                  <option value="10">粉丝可见 (10)</option>
+                  <option value="5">群可见 (5)</option>
+                </select>
+              </div>
+              <div class="publish-option-item">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; margin-bottom: 6px;">
+                  <input type="checkbox" id="publish-schedule-enabled">
+                  <span>⏰ 定时发布（需晚于当前 10 分钟）</span>
+                </label>
+                <input type="datetime-local" class="form-control" id="publish-schedule-time" disabled style="min-width: 220px;">
+              </div>
+              <div style="display: flex; gap: 10px; align-items: flex-end; margin-left: auto;">
+                <button type="button" class="btn btn-secondary" id="btn-publish-dry-run">🧪 干跑校验</button>
+                <button type="button" class="btn btn-primary" id="btn-publish-submit">🚀 发布微博</button>
+              </div>
+            </div>
+
+            <div id="publish-result-box" class="publish-result-box" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- Posts Management Card -->
+        <div class="content-box">
+          <div class="content-box-header">
+            <div>
+              <h3 style="font-size: 1.05rem; font-weight: 700;">🗂️ 我的微博与发布记录管理</h3>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;" id="publish-posts-hint">
+                支持实时查看账号微博、修改可见性、在线编辑正文及删除微博
+              </p>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <button class="btn btn-primary btn-sm" id="btn-posts-remote">🌐 账号实时微博</button>
+              <button class="btn btn-secondary btn-sm" id="btn-posts-local">📝 控制台历史</button>
+              <button class="btn btn-secondary btn-sm" id="btn-posts-refresh">🔄 刷新</button>
+            </div>
+          </div>
+          <div style="padding: 18px 24px;">
+            <div id="publish-posts-list" class="publish-posts-list">
+              <div style="text-align: center; color: var(--text-dim); padding: 36px;">点击刷新或切换到此页自动加载...</div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+              <button class="btn btn-secondary btn-sm" id="btn-posts-prev">上一页</button>
+              <span style="font-size: 0.85rem; color: var(--text-muted);" id="publish-posts-page">第 1 页</span>
+              <button class="btn btn-secondary btn-sm" id="btn-posts-next">下一页</button>
             </div>
           </div>
         </div>
@@ -1246,6 +1364,7 @@
               <button class="api-cat-btn" data-cat="cookie">Cookie认证</button>
               <button class="api-cat-btn" data-cat="test">连通测试</button>
               <button class="api-cat-btn" data-cat="data">日志与数据</button>
+              <button class="api-cat-btn" data-cat="publish">发布管理</button>
               <button class="api-cat-btn" data-cat="legacy">经典兼容</button>
             </div>
             <div class="api-search-box">
@@ -1597,7 +1716,75 @@
             </div>
           </div>
 
-          <!-- 7. 经典兼容 -->
+          <!-- 7. 发布管理 -->
+          <div class="api-card" data-cat="publish" data-search="get /api/publish/status 发博登录态 xsrf">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/publish/status</span>
+              </div>
+              <span class="api-summary">检查当前 Cookie 是否具备 weibo.com 个人发布权限及 XSRF-TOKEN</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">响应示例 (200 OK)</div>
+              <pre class="api-code-block"><code>{
+  "code": 200,
+  "data": { "logged_in": true, "uid": "1863732524", "screen_name": "账号昵称", "has_xsrf": true }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="publish" data-search="post /api/publish/post 发布 定时微博 图片">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/publish/post</span>
+              </div>
+              <span class="api-summary">发布或定时发布微博（支持 visible 0/1/5/6/10、多图 pid、dry_run）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求体 (JSON)</div>
+              <pre class="api-code-block"><code>{
+  "content": "测试微博正文 #话题#",
+  "visible": 1,
+  "pics": [{ "pid": "0021x...", "type": "image/jpeg" }],
+  "schedule_time": null,
+  "dry_run": false
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="publish" data-search="post /api/publish/upload_image 图片上传 pid">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/publish/upload_image</span>
+              </div>
+              <span class="api-summary">上传图片至微博图床并返回 pid 与预览地址（multipart file 或 file_path）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">JSON 请求示例</div>
+              <pre class="api-code-block"><code>{ "file_path": "/abs/path/to/image.jpg" }</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="publish" data-search="post /api/publish/edit visibility delete posts 修改可见性 编辑 删除">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">POST</span>
+                <span class="api-path">/api/publish/edit | /visibility | /delete</span>
+              </div>
+              <span class="api-summary">编辑博文 (/edit)、修改可见范围 (/visibility)、删除微博 (/delete) 及列表 (/posts)</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">请求示例</div>
+              <pre class="api-code-block"><code>// 修改可见性: POST /api/publish/visibility  -> { "mid": "5367...", "visible": 0 }
+// 编辑微博:   POST /api/publish/edit        -> { "mid": "5367...", "content": "新正文" }
+// 删除微博:   POST /api/publish/delete      -> { "mid": "5367..." }</code></pre>
+            </div>
+          </div>
+
+          <!-- 8. 经典兼容 -->
           <div class="api-card" data-cat="legacy" data-search="post /refresh 兼容 历史接口 task_id">
             <div class="api-card-header">
               <div class="api-method-path">
@@ -1757,9 +1944,42 @@
           </div>
         </div>
       </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary modal-close" data-modal="modal-update-cookie">取消</button>
+          <button class="btn btn-primary" id="btn-confirm-update-cookie">保存并测试</button>
+        </div>
+      </div>
+    </div>
+
+  <!-- Modal 4: Edit Weibo Post -->
+  <div class="modal-overlay" id="modal-edit-weibo">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.1rem; font-weight: 700;">✏️ 编辑微博</h3>
+        <button class="btn-icon modal-close" data-modal="modal-edit-weibo">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-weibo-mid">
+        <div id="edit-weibo-check-msg" class="publish-auth-bar" style="margin-bottom: 12px; display: none;"></div>
+        <div class="form-group">
+          <label class="form-label">微博正文</label>
+          <textarea class="form-control" id="edit-weibo-content" rows="5" placeholder="输入修改后的微博正文..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">可见范围</label>
+          <select class="form-control" id="edit-weibo-visible">
+            <option value="">保持原有可见范围</option>
+            <option value="0">公开 (0)</option>
+            <option value="1">仅自己可见 (1)</option>
+            <option value="6">好友圈 (6)</option>
+            <option value="10">粉丝可见 (10)</option>
+            <option value="5">群可见 (5)</option>
+          </select>
+        </div>
+      </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary modal-close" data-modal="modal-update-cookie">取消</button>
-        <button class="btn btn-primary" id="btn-confirm-update-cookie">保存并测试</button>
+        <button class="btn btn-secondary modal-close" data-modal="modal-edit-weibo">取消</button>
+        <button class="btn btn-primary" id="btn-confirm-edit-weibo">保存修改</button>
       </div>
     </div>
   </div>
@@ -1767,7 +1987,7 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/js/console.js?v=5"></script>
+  <script src="/static/js/console.js?v=6"></script>
 </body>
 
 </html>

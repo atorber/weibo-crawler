@@ -14,7 +14,11 @@ const state = {
   dataPageSize: 10,
   autoScroll: true,
   logFilterLevel: 'ALL',
-  logFilterKeyword: ''
+  logFilterKeyword: '',
+  publishPics: [],
+  publishPostsSource: 'remote',
+  publishPostsPage: 1,
+  publishStatus: null
 };
 
 // DOM Content Loaded Initializer
@@ -23,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initNavigation();
   initModals();
   initControlButtons();
+  initPublishCenter();
   initConfigCenter();
   initUsersManager();
   initLogStreamer();
@@ -85,6 +90,7 @@ function initNavigation() {
 
   const titles = {
     dashboard: { title: '总览控制', subtitle: '监控爬虫实时运行状态与全局任务调度' },
+    publish: { title: '发布管理', subtitle: '撰写图文微博、定时发布、修改可见范围与管理个人博文' },
     targets: { title: '目标管理', subtitle: '维护微博采集目标用户队列与增量配置' },
     settings: { title: '参数配置', subtitle: '可视化调整所有爬虫参数或编辑 config.json 源码' },
     output: { title: '数据存储', subtitle: '配置结构化文本、数据库与 Webhook 目标介质及开关' },
@@ -152,6 +158,7 @@ function initNavigation() {
     }
 
     // Tab specific refresh
+    if (tab === 'publish') loadPublishView();
     if (tab === 'targets') fetchUsers();
     if (tab === 'settings' || tab === 'output') fetchConfig();
     if (tab === 'logs') fetchLogs();
@@ -1835,5 +1842,479 @@ function initApiDocs() {
   if (searchInput) {
     searchInput.addEventListener('input', filterCards);
   }
+}
+
+// ==========================================
+// Publish & Post Management Center
+// ==========================================
+function loadPublishView() {
+  fetchPublishStatus();
+  fetchPublishPosts();
+}
+
+async function fetchPublishStatus() {
+  const banner = document.getElementById('publish-auth-banner');
+  const textEl = document.getElementById('publish-auth-text');
+  if (!banner || !textEl) return;
+
+  textEl.textContent = '正在检查 weibo.com 登录态...';
+  banner.classList.remove('ok', 'err');
+  try {
+    const res = await fetch('/api/publish/status');
+    const json = await res.json();
+    const d = json.data || {};
+    state.publishStatus = d;
+    if (d.logged_in) {
+      banner.classList.add('ok');
+      const name = d.screen_name ? `${d.screen_name} (UID: ${d.uid})` : (d.uid ? `UID: ${d.uid}` : '已登录');
+      textEl.textContent = `✅ 已就绪：${name}${d.has_xsrf ? ' · XSRF-TOKEN 已同步' : ''}`;
+    } else {
+      banner.classList.add('err');
+      textEl.textContent = `⚠️ ${d.message || '尚未检测到 weibo.com 个人登录态，请先更新 Cookie'}`;
+    }
+  } catch (err) {
+    banner.classList.add('err');
+    textEl.textContent = `❌ 检查发布权限失败: ${err.message}`;
+  }
+}
+
+function renderPublishPicGrid() {
+  const grid = document.getElementById('publish-pic-grid');
+  const countEl = document.getElementById('publish-pic-count');
+  if (countEl) countEl.textContent = `已传 ${state.publishPics.length} / 18 张`;
+  if (!grid) return;
+
+  if (!state.publishPics.length) {
+    grid.innerHTML = '';
+    return;
+  }
+
+  grid.innerHTML = state.publishPics.map((p, idx) => `
+    <div class="publish-pic-card">
+      <img src="${escapeHtml(p.preview_url || '')}" alt="配图 ${idx + 1}">
+      <button type="button" class="publish-pic-remove" data-index="${idx}" title="移除图片">✕</button>
+    </div>
+  `).join('');
+
+  grid.querySelectorAll('.publish-pic-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-index'), 10);
+      if (!Number.isNaN(idx)) {
+        state.publishPics.splice(idx, 1);
+        renderPublishPicGrid();
+      }
+    });
+  });
+}
+
+async function fetchPublishPosts() {
+  const listEl = document.getElementById('publish-posts-list');
+  const pageEl = document.getElementById('publish-posts-page');
+  const hintEl = document.getElementById('publish-posts-hint');
+  if (!listEl) return;
+
+  if (pageEl) pageEl.textContent = `第 ${state.publishPostsPage} 页`;
+  listEl.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 28px;">正在加载微博列表...</div>';
+
+  try {
+    const res = await fetch(`/api/publish/posts?source=${encodeURIComponent(state.publishPostsSource)}&page=${state.publishPostsPage}`);
+    const json = await res.json();
+    const d = json.data || {};
+    const items = d.items || [];
+
+    if (hintEl) {
+      if (d.remote_error && state.publishPostsSource === 'remote') {
+        hintEl.textContent = `远端拉取失败 (${d.remote_error})，已自动展示控制台本地历史`;
+      } else if (state.publishPostsSource === 'local') {
+        hintEl.textContent = '当前显示通过本控制台发布/修改的历史记录 (log/publish_history.json)';
+      } else {
+        hintEl.textContent = d.uid ? `当前账号 (${d.screen_name || d.uid}) 最新微博列表` : '实时账号微博列表';
+      }
+    }
+
+    if (!items.length) {
+      listEl.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 36px;">暂无微博记录</div>';
+      return;
+    }
+
+    const visChoices = [
+      { value: 0, label: '公开' },
+      { value: 1, label: '仅自己可见' },
+      { value: 6, label: '好友圈' },
+      { value: 10, label: '粉丝可见' },
+      { value: 5, label: '群可见' }
+    ];
+
+    listEl.innerHTML = items.map(item => {
+      const mid = String(item.mid || '');
+      const visVal = Number(item.visible_type ?? 0);
+      const visLabel = item.visible_label || visChoices.find(v => v.value === visVal)?.label || String(visVal);
+      const isDeleted = !!item.deleted;
+      const isScheduled = !!item.scheduled && !item.mblogid;
+      const picsHtml = (item.pics && item.pics.length)
+        ? `<div class="publish-post-thumbs">${item.pics.slice(0, 9).map(p => `<img src="${escapeHtml(p.url || p.preview_url || '')}" alt="">`).join('')}</div>`
+        : '';
+      const optionsHtml = visChoices.map(v => `<option value="${v.value}"${v.value === visVal ? ' selected' : ''}>${v.label}</option>`).join('');
+
+      return `
+        <div class="publish-post-item ${isDeleted ? 'is-deleted' : ''}" data-mid="${escapeHtml(mid)}">
+          <div class="publish-post-meta">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span class="visible-badge">${escapeHtml(visLabel)}</span>
+              ${isScheduled ? '<span class="visible-badge scheduled">定时</span>' : ''}
+              ${isDeleted ? '<span class="visible-badge deleted">已删除</span>' : ''}
+              <span class="publish-post-time">${escapeHtml(item.created_at || item.recorded_at || '')}</span>
+              ${mid ? `<code style="font-size: 0.74rem; color: var(--text-dim);">mid: ${escapeHtml(mid)}</code>` : ''}
+            </div>
+            ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">查看原博 ↗</a>` : ''}
+          </div>
+          <div class="publish-post-text">${escapeHtml(item.text_raw || '')}</div>
+          ${picsHtml}
+          <div class="publish-post-actions">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <select class="form-control form-control-sm post-vis-select" style="width: auto; padding: 4px 8px; font-size: 0.8rem;" ${!mid || isDeleted || isScheduled ? 'disabled' : ''}>
+                ${optionsHtml}
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm btn-post-vis" data-mid="${escapeHtml(mid)}" ${!mid || isDeleted || isScheduled ? 'disabled' : ''}>修改可见性</button>
+              <button type="button" class="btn btn-secondary btn-sm btn-post-edit" data-mid="${escapeHtml(mid)}" data-content="${escapeHtml(item.text_raw || '')}" data-vis="${visVal}" ${!mid || isDeleted || isScheduled ? 'disabled' : ''}>✏️ 编辑</button>
+              <button type="button" class="btn btn-danger btn-sm btn-post-delete" data-mid="${escapeHtml(mid)}" ${!mid || isDeleted ? 'disabled' : ''}>🗑️ 删除</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    bindPostActionHandlers(listEl);
+  } catch (err) {
+    listEl.innerHTML = `<div style="text-align: center; color: #f87171; padding: 28px;">加载微博列表失败: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function bindPostActionHandlers(listEl) {
+  listEl.querySelectorAll('.btn-post-vis').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mid = btn.getAttribute('data-mid');
+      const card = btn.closest('.publish-post-item');
+      const select = card?.querySelector('.post-vis-select');
+      if (!mid || !select) return;
+      const visible = parseInt(select.value, 10);
+
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/publish/visibility', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mid, visible })
+        });
+        const json = await res.json();
+        if (json.code === 200 && json.success) {
+          showToast(json.message || '可见范围修改成功', 'success');
+          fetchPublishPosts();
+        } else {
+          showToast(json.message || '修改可见性失败', 'error');
+        }
+      } catch (err) {
+        showToast(`请求失败: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  listEl.querySelectorAll('.btn-post-edit').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mid = btn.getAttribute('data-mid');
+      const fallbackContent = btn.getAttribute('data-content') || '';
+      const fallbackVis = btn.getAttribute('data-vis') || '';
+      const midInput = document.getElementById('edit-weibo-mid');
+      const checkMsg = document.getElementById('edit-weibo-check-msg');
+      const contentBox = document.getElementById('edit-weibo-content');
+      const visSelect = document.getElementById('edit-weibo-visible');
+      const confirmBtn = document.getElementById('btn-confirm-edit-weibo');
+
+      if (midInput) midInput.value = mid;
+      if (contentBox) contentBox.value = fallbackContent;
+      if (visSelect) visSelect.value = '';
+      if (checkMsg) {
+        checkMsg.style.display = 'block';
+        checkMsg.classList.remove('ok', 'err');
+        checkMsg.textContent = '正在校验该微博是否允许编辑...';
+      }
+      if (confirmBtn) confirmBtn.disabled = false;
+
+      openModal('modal-edit-weibo');
+
+      try {
+        const res = await fetch(`/api/publish/can_edit/${encodeURIComponent(mid)}`);
+        const json = await res.json();
+        const d = json.data || {};
+        if (json.code === 200 && d.can_edit) {
+          if (d.content && contentBox) contentBox.value = d.content;
+          if (d.visible !== null && d.visible !== undefined && visSelect) {
+            visSelect.value = String(d.visible);
+          } else if (fallbackVis && visSelect) {
+            visSelect.value = String(fallbackVis);
+          }
+          if (checkMsg) {
+            checkMsg.classList.add('ok');
+            checkMsg.textContent = `✅ ${d.msg || '当前微博允许编辑'}`;
+          }
+        } else {
+          if (checkMsg) {
+            checkMsg.classList.add('err');
+            checkMsg.textContent = `⚠️ ${d.msg || json.message || '当前微博可能不可编辑'}`;
+          }
+        }
+      } catch (err) {
+        if (checkMsg) {
+          checkMsg.classList.add('err');
+          checkMsg.textContent = `⚠️ 校验可编辑状态异常: ${err.message}`;
+        }
+      }
+    });
+  });
+
+  listEl.querySelectorAll('.btn-post-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mid = btn.getAttribute('data-mid');
+      if (!mid) return;
+      if (!window.confirm(`确定要永久删除这条微博 (mid: ${mid}) 吗？`)) return;
+
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/publish/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mid })
+        });
+        const json = await res.json();
+        if (json.code === 200 && json.success) {
+          showToast(json.message || '微博已删除', 'success');
+          fetchPublishPosts();
+        } else {
+          showToast(json.message || '删除失败', 'error');
+        }
+      } catch (err) {
+        showToast(`删除失败: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function initPublishCenter() {
+  const contentEl = document.getElementById('publish-content');
+  const charCountEl = document.getElementById('publish-char-count');
+  if (contentEl && charCountEl) {
+    contentEl.addEventListener('input', () => {
+      charCountEl.textContent = `${contentEl.value.length} 字`;
+    });
+  }
+
+  document.querySelectorAll('.publish-insert-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      if (!contentEl) return;
+      const snippet = chip.getAttribute('data-snippet') || '';
+      const start = contentEl.selectionStart ?? contentEl.value.length;
+      const end = contentEl.selectionEnd ?? contentEl.value.length;
+      contentEl.value = contentEl.value.slice(0, start) + snippet + contentEl.value.slice(end);
+      contentEl.focus();
+      const pos = start + snippet.length;
+      contentEl.setSelectionRange(pos, pos);
+      contentEl.dispatchEvent(new Event('input'));
+    });
+  });
+
+  document.getElementById('btn-publish-refresh-status')?.addEventListener('click', fetchPublishStatus);
+  document.getElementById('btn-publish-open-cookie')?.addEventListener('click', () => {
+    document.getElementById('btn-open-cookie-modal')?.click();
+  });
+
+  const scheduleToggle = document.getElementById('publish-schedule-enabled');
+  const scheduleInput = document.getElementById('publish-schedule-time');
+  if (scheduleToggle && scheduleInput) {
+    scheduleToggle.addEventListener('change', () => {
+      scheduleInput.disabled = !scheduleToggle.checked;
+      if (scheduleToggle.checked && !scheduleInput.value) {
+        const d = new Date(Date.now() + 15 * 60 * 1000);
+        const pad = n => String(n).padStart(2, '0');
+        scheduleInput.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+    });
+  }
+
+  const pickBtn = document.getElementById('btn-publish-pick-images');
+  const fileInput = document.getElementById('publish-image-input');
+  if (pickBtn && fileInput) {
+    pickBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      const files = Array.from(fileInput.files || []);
+      fileInput.value = '';
+      if (!files.length) return;
+
+      if (state.publishPics.length + files.length > 18) {
+        showToast('单条微博最多支持 18 张配图', 'error');
+        return;
+      }
+
+      pickBtn.disabled = true;
+      pickBtn.textContent = '⏳ 上传中...';
+      try {
+        for (const file of files) {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch('/api/publish/upload_image', { method: 'POST', body: fd });
+          const json = await res.json();
+          if (json.code === 200 && json.success && json.data) {
+            state.publishPics.push(json.data);
+            renderPublishPicGrid();
+          } else {
+            showToast(json.message || `图片 ${file.name} 上传失败`, 'error');
+          }
+        }
+      } catch (err) {
+        showToast(`上传图片异常: ${err.message}`, 'error');
+      } finally {
+        pickBtn.disabled = false;
+        pickBtn.textContent = '🖼️ 上传配图';
+      }
+    });
+  }
+
+  async function submitPublish(dryRun) {
+    const content = contentEl ? contentEl.value : '';
+    const visible = parseInt(document.getElementById('publish-visible')?.value ?? '1', 10);
+    const scheduleEnabled = !!document.getElementById('publish-schedule-enabled')?.checked;
+    const scheduleTime = scheduleEnabled ? (document.getElementById('publish-schedule-time')?.value || null) : null;
+    const resultBox = document.getElementById('publish-result-box');
+    const submitBtn = document.getElementById('btn-publish-submit');
+    const dryBtn = document.getElementById('btn-publish-dry-run');
+
+    if (submitBtn) submitBtn.disabled = true;
+    if (dryBtn) dryBtn.disabled = true;
+    try {
+      const res = await fetch('/api/publish/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+          visible,
+          pics: state.publishPics.map(p => ({ pid: p.pid, type: p.type })),
+          schedule_time: scheduleTime,
+          dry_run: dryRun
+        })
+      });
+      const json = await res.json();
+      if (resultBox) {
+        resultBox.style.display = 'block';
+        resultBox.classList.remove('ok', 'err');
+      }
+
+      if (json.code === 200 && json.success) {
+        const d = json.data || {};
+        showToast(json.message || '发布成功', 'success');
+        if (resultBox) {
+          resultBox.classList.add('ok');
+          if (dryRun) {
+            resultBox.innerHTML = `✅ 干跑校验通过：接口 <code>${escapeHtml(d.endpoint || '')}</code>，可见性 <b>${escapeHtml(d.visible_label || '')}</b>`;
+          } else {
+            const link = d.url ? `<a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color: #93c5fd; margin-left: 10px;">查看微博 ↗</a>` : '';
+            resultBox.innerHTML = `✅ ${escapeHtml(json.message || '发布成功')}（mid: <code>${escapeHtml(d.mid || '')}</code>）${link}`;
+          }
+        }
+        if (!dryRun) {
+          if (contentEl) {
+            contentEl.value = '';
+            contentEl.dispatchEvent(new Event('input'));
+          }
+          state.publishPics = [];
+          renderPublishPicGrid();
+          state.publishPostsPage = 1;
+          fetchPublishPosts();
+        }
+      } else {
+        showToast(json.message || '发布失败', 'error');
+        if (resultBox) {
+          resultBox.classList.add('err');
+          resultBox.textContent = `❌ ${json.message || '发布失败'}`;
+        }
+      }
+    } catch (err) {
+      showToast(`请求异常: ${err.message}`, 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+      if (dryBtn) dryBtn.disabled = false;
+    }
+  }
+
+  document.getElementById('btn-publish-dry-run')?.addEventListener('click', () => submitPublish(true));
+  document.getElementById('btn-publish-submit')?.addEventListener('click', () => submitPublish(false));
+
+  const remoteBtn = document.getElementById('btn-posts-remote');
+  const localBtn = document.getElementById('btn-posts-local');
+  function updateSourceButtons() {
+    if (!remoteBtn || !localBtn) return;
+    if (state.publishPostsSource === 'remote') {
+      remoteBtn.className = 'btn btn-primary btn-sm';
+      localBtn.className = 'btn btn-secondary btn-sm';
+    } else {
+      remoteBtn.className = 'btn btn-secondary btn-sm';
+      localBtn.className = 'btn btn-primary btn-sm';
+    }
+  }
+  remoteBtn?.addEventListener('click', () => {
+    state.publishPostsSource = 'remote';
+    state.publishPostsPage = 1;
+    updateSourceButtons();
+    fetchPublishPosts();
+  });
+  localBtn?.addEventListener('click', () => {
+    state.publishPostsSource = 'local';
+    state.publishPostsPage = 1;
+    updateSourceButtons();
+    fetchPublishPosts();
+  });
+  document.getElementById('btn-posts-refresh')?.addEventListener('click', fetchPublishPosts);
+  document.getElementById('btn-posts-prev')?.addEventListener('click', () => {
+    if (state.publishPostsPage > 1) {
+      state.publishPostsPage--;
+      fetchPublishPosts();
+    }
+  });
+  document.getElementById('btn-posts-next')?.addEventListener('click', () => {
+    state.publishPostsPage++;
+    fetchPublishPosts();
+  });
+
+  document.getElementById('btn-confirm-edit-weibo')?.addEventListener('click', async () => {
+    const mid = document.getElementById('edit-weibo-mid')?.value;
+    const content = document.getElementById('edit-weibo-content')?.value || '';
+    const visRaw = document.getElementById('edit-weibo-visible')?.value;
+    const visible = visRaw === '' ? null : parseInt(visRaw, 10);
+    const btn = document.getElementById('btn-confirm-edit-weibo');
+    if (!mid) return;
+
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('/api/publish/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mid, content, visible, check_first: true })
+      });
+      const json = await res.json();
+      if (json.code === 200 && json.success) {
+        showToast(json.message || '编辑成功', 'success');
+        closeModal('modal-edit-weibo');
+        fetchPublishPosts();
+      } else {
+        showToast(json.message || '编辑失败', 'error');
+      }
+    } catch (err) {
+      showToast(`编辑失败: ${err.message}`, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
 }
 

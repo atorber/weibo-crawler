@@ -118,6 +118,33 @@ python skills/weibo-viewer/scripts/weibo_ctl.py cookie --extract --browser chrom
 
 ---
 
+### 7. Publish & Manage Weibo Posts
+Use when checking publishing login state, posting text/image/scheduled Weibo posts, changing visibility, editing, or deleting posts (online API first, offline fallback supported).
+
+> **Safety Gate**: Always ask the user for explicit confirmation of the exact post text and visibility before publishing a public post (`--visible 0`), editing, or deleting a post (`delete`). Prefer `--visible 1` (self-only) or `--dry-run` for tests.
+
+Visibility codes (`--visible`): `0` = Public (公开), `1` = Self-only (仅自己可见), `6` = Friends circle (好友圈), `10` = Fans-only (粉丝可见), `5` = Group (群可见).
+
+```bash
+# Check weibo.com personal publishing auth & XSRF status
+python skills/weibo-viewer/scripts/weibo_ctl.py publish status
+
+# Dry-run or publish a self-only post with images
+python skills/weibo-viewer/scripts/weibo_ctl.py publish post --text "测试内容 #话题#" --images a.jpg b.png --visible 1 --dry-run
+python skills/weibo-viewer/scripts/weibo_ctl.py publish post --text "测试内容" --visible 1
+
+# Schedule a post (>= 10 minutes ahead)
+python skills/weibo-viewer/scripts/weibo_ctl.py publish post --text "定时发布" --visible 0 --schedule "2026-11-20 09:00"
+
+# List recent own posts, change visibility, edit, or delete
+python skills/weibo-viewer/scripts/weibo_ctl.py publish list --source remote --page 1
+python skills/weibo-viewer/scripts/weibo_ctl.py publish visibility --mid 5367067832485479 --visible 0
+python skills/weibo-viewer/scripts/weibo_ctl.py publish edit --mid 5367067832485479 --text "修改后的正文"
+python skills/weibo-viewer/scripts/weibo_ctl.py publish delete --mid 5367067832485479
+```
+
+---
+
 ## 📚 Advanced Architecture & Direct API / SQL Access
 
 For complex custom data analysis or automated scripting:

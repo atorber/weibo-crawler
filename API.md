@@ -36,11 +36,20 @@
   - [清空内存日志缓冲区 (POST /api/logs/clear)](#62-清空内存日志缓冲区)
 - [7. 本地数据检索](#7-本地数据检索)
   - [分页查询已存入微博 (GET /api/data/weibos)](#71-分页查询已存入微博)
-- [8. 兼容旧版端点 (Legacy API)](#8-兼容旧版端点-legacy-api)
-  - [异步刷新数据 (POST /refresh)](#81-异步刷新数据)
-  - [查询任务状态 (GET /task/\<task_id\>)](#82-查询任务状态)
-  - [获取微博列表 (GET /weibos)](#83-获取微博列表)
-  - [获取单条微博 (GET /weibos/\<weibo_id\>)](#84-获取单条微博)
+- [8. 微博发布与博文管理](#8-微博发布与博文管理)
+  - [检查发博登录态 (GET /api/publish/status)](#81-检查发博登录态)
+  - [上传微博图片 (POST /api/publish/upload_image)](#82-上传微博图片)
+  - [发布 / 定时发布微博 (POST /api/publish/post)](#83-发布--定时发布微博)
+  - [检查微博是否可编辑 (GET /api/publish/can_edit/\<mid\>)](#84-检查微博是否可编辑)
+  - [编辑微博 (POST /api/publish/edit)](#85-编辑微博)
+  - [修改微博可见范围 (POST /api/publish/visibility)](#86-修改微博可见范围)
+  - [删除微博 (POST /api/publish/delete)](#87-删除微博)
+  - [查询个人/控制台发布列表 (GET /api/publish/posts)](#88-查询个人控制台发布列表)
+- [9. 兼容旧版端点 (Legacy API)](#9-兼容旧版端点-legacy-api)
+  - [异步刷新数据 (POST /refresh)](#91-异步刷新数据)
+  - [查询任务状态 (GET /task/\<task_id\>)](#92-查询任务状态)
+  - [获取微博列表 (GET /weibos)](#93-获取微博列表)
+  - [获取单条微博 (GET /weibos/\<weibo_id\>)](#94-获取单条微博)
 - [统一响应与错误码规范](#统一响应与错误码规范)
 
 ---
@@ -88,6 +97,14 @@ python service.py --port 15001 --host 0.0.0.0
 | **日志与数据** | `GET` | `/api/logs` | 实时拉取内存运行日志（支持等级与关键字过滤） |
 | | `POST` | `/api/logs/clear` | 清空内存日志缓冲区 |
 | | `GET` | `/api/data/weibos` | 分页检索 SQLite 本地数据库微博记录 |
+| **发布管理** | `GET` | `/api/publish/status` | 检查 `weibo.com` 个人发布权限与 `XSRF-TOKEN` 状态 |
+| | `POST` | `/api/publish/upload_image` | 上传本地/表单图片至微博图床并返回 `pid` 与预览 URL |
+| | `POST` | `/api/publish/post` | 发布或定时发布微博（支持图文、可见范围与干跑校验） |
+| | `GET` | `/api/publish/can_edit/<mid>` | 检查指定微博 `mid` 当前账号是否允许编辑 |
+| | `POST` | `/api/publish/edit` | 编辑已发布微博正文、图片或可见范围 |
+| | `POST` | `/api/publish/visibility` | 修改指定微博的可见范围（`0/1/5/6/10`） |
+| | `POST` | `/api/publish/delete` | 删除指定 `mid` 的微博 |
+| | `GET` | `/api/publish/posts` | 拉取当前账号远端微博列表与本地控制台发布历史 |
 | **兼容旧版** | `POST` | `/refresh` | 触发采集任务（返回 202/409，带 task_id） |
 | | `GET` | `/task/<task_id>` | 查询指定 task_id 的进度与状态 |
 | | `GET` | `/weibos` | 获取最近 100 条抓取微博记录 |
@@ -556,17 +573,176 @@ python service.py --port 15001 --host 0.0.0.0
   }
 }
 ```
+
+---
+
+## 8. 微博发布与博文管理
+
+> 基于现网 `https://weibo.com/` (`weibo-pro-next`) 协议实现，需要 `weibo.com` 个人登录态（含 `SUB`、`XSRF-TOKEN`），不支持匿名访客 Cookie。
+
+### 可见性枚举 (`visible`)
+
+| 取值 | 含义 | 说明 |
+| :--- | :--- | :--- |
+| `0` | 公开 | 所有人可见 |
+| `1` | 仅自己可见 | 私密微博（推荐测试时使用） |
+| `6` | 好友圈 | 仅互相关注好友可见 |
+| `10` | 粉丝可见 | 仅粉丝可见 |
+| `5` | 群可见 | 粉丝群可见 |
+
+### 8.1 检查发博登录态
+
+- **URL**: `/api/publish/status`
+- **Method**: `GET`
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "data": {
+    "logged_in": true,
+    "uid": "1863732524",
+    "screen_name": "示例账号",
+    "has_xsrf": true,
+    "message": "Cookie 具备 weibo.com 发布权限（账号：示例账号）",
+    "visible_options": [
+      { "value": 0, "label": "公开" },
+      { "value": 1, "label": "仅自己可见" },
+      { "value": 6, "label": "好友圈" },
+      { "value": 10, "label": "粉丝可见" },
+      { "value": 5, "label": "群可见" }
+    ]
   }
 }
 ```
 
+### 8.2 上传微博图片
+
+- **URL**: `/api/publish/upload_image`
+- **Method**: `POST`
+- **请求方式**:
+  - `multipart/form-data`：字段名 `file`
+  - 或 `application/json`：`{"file_path": "/abs/path/to/photo.jpg"}`
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "上传成功",
+  "data": {
+    "pid": "0021x...",
+    "type": "image/jpeg",
+    "preview_url": "https://wx1.sinaimg.cn/bmiddle/0021x....jpg",
+    "large_url": "https://wx1.sinaimg.cn/large/0021x....jpg"
+  }
+}
+```
+
+### 8.3 发布 / 定时发布微博
+
+- **URL**: `/api/publish/post`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "content": "测试一条图文微博 #自动化#",
+  "visible": 1,
+  "pics": [{ "pid": "0021x...", "type": "image/jpeg" }],
+  "images": [],
+  "schedule_time": null,
+  "dry_run": false
+}
+```
+> 若提供 `schedule_time`（支持 `"YYYY-MM-DD HH:MM"` 或毫秒时间戳，且必须至少晚于当前时间 10 分钟），将自动走微博定时发布通道。
+
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "message": "发布成功",
+  "data": {
+    "ok": true,
+    "mid": "5367067832485479",
+    "mblogid": "Rs8JVaqAn",
+    "url": "https://weibo.com/1863732524/Rs8JVaqAn",
+    "visible": 1,
+    "visible_label": "仅自己可见"
+  }
+}
+```
+
+### 8.4 检查微博是否可编辑
+
+- **URL**: `/api/publish/can_edit/<mid>`
+- **Method**: `GET`
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "success": true,
+  "data": {
+    "ok": true,
+    "can_edit": true,
+    "mid": "5367067832485479",
+    "content": "原微博正文",
+    "msg": "当前微博可编辑"
+  }
+}
+```
+
+### 8.5 编辑微博
+
+- **URL**: `/api/publish/edit`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "mid": "5367067832485479",
+  "content": "修改后的微博正文",
+  "visible": 1,
+  "check_first": true,
+  "dry_run": false
+}
+```
+
+### 8.6 修改微博可见范围
+
+- **URL**: `/api/publish/visibility`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "mid": "5367067832485479",
+  "visible": 0
+}
+```
+
+### 8.7 删除微博
+
+- **URL**: `/api/publish/delete`
+- **Method**: `POST`
+- **请求体 (JSON)**:
+```json
+{
+  "mid": "5367067832485479"
+}
+```
+
+### 8.8 查询个人/控制台发布列表
+
+- **URL**: `/api/publish/posts`
+- **Method**: `GET`
+- **Query 参数**:
+  - `source`: `remote`（实时拉取个人主页微博，失败自动回退本地记录）或 `local`（仅查本地 `log/publish_history.json`）
+  - `page`: 页码（默认 `1`）
+
 ---
 
-## 8. 兼容旧版端点 (Legacy API)
+## 9. 兼容旧版端点 (Legacy API)
 
 为了与历史第三方接入系统保持 100% 向后兼容，以下经典端点保持完整支持：
 
-### 8.1 异步刷新数据
+### 9.1 异步刷新数据
 - **URL**: `/refresh`
 - **Method**: `POST`
 - **请求体**: `{"user_id_list": ["6067225218"]}` (可选)
@@ -574,7 +750,7 @@ python service.py --port 15001 --host 0.0.0.0
   - `202 Accepted`: 任务成功启动，返回 `task_id`（当前进程 PID）
   - `409 Conflict`: 当前已有正在执行的任务
 
-### 8.2 查询任务状态
+### 9.2 查询任务状态
 - **URL**: `/task/<task_id>`
 - **Method**: `GET`
 - **响应示例**:
@@ -586,12 +762,12 @@ python service.py --port 15001 --host 0.0.0.0
 }
 ```
 
-### 8.3 获取微博列表
+### 9.3 获取微博列表
 - **URL**: `/weibos`
 - **Method**: `GET`
 - **说明**: 直接返回最近 100 条抓取微博的数组列表。
 
-### 8.4 获取单条微博
+### 9.4 获取单条微博
 - **URL**: `/weibos/<weibo_id>`
 - **Method**: `GET`
 - **状态码**: 200（找到）或 404（不存在）。

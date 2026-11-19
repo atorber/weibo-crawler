@@ -44,12 +44,15 @@ from util.browser_cookie import (
     verify_cookie_string,
 )
 from util.config import config_paths
+from util.publish.weibo_publisher import VISIBLE_OPTIONS, WeiboPublisher
 from weibo import get_config as get_weibo_config, handle_config_renaming
 
 BASE_DIR = os.path.split(os.path.realpath(__file__))[0]
 CONFIG_PATH, EXAMPLE_CONFIG_PATH = config_paths.config_files(BASE_DIR)
 USER_ID_FILE_PATH = config_paths.resolve_config_file(BASE_DIR, "user_id_list.txt")
 LOG_DIR = os.path.join(BASE_DIR, "log")
+PUBLISH_HISTORY_PATH = os.path.join(LOG_DIR, "publish_history.json")
+_publish_history_lock = threading.Lock()
 
 if not os.path.isdir(LOG_DIR):
     os.makedirs(LOG_DIR)
@@ -756,6 +759,7 @@ def add_no_cache_headers(response):
 @app.route("/")
 @app.route("/console")
 @app.route("/dashboard")
+@app.route("/publish")
 @app.route("/targets")
 @app.route("/settings")
 @app.route("/output")
@@ -1309,6 +1313,427 @@ def api_data_weibos():
         end_date=end_date,
     )
     return jsonify({"code": 200, "data": res})
+
+
+# ==========================================
+# Publish History Helpers & REST API (/api/publish/*)
+# ==========================================
+def _load_publish_history():
+    with _publish_history_lock:
+        if not os.path.isfile(PUBLISH_HISTORY_PATH):
+            return []
+        try:
+            with open(PUBLISH_HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+
+def _save_publish_history_unlocked(records):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    with open(PUBLISH_HISTORY_PATH, "w", encoding="utf-8") as f:
+        json.dump(records[:200], f, indent=2, ensure_ascii=False)
+
+
+def _record_publish_history(entry):
+    with _publish_history_lock:
+        if os.path.isfile(PUBLISH_HISTORY_PATH):
+            try:
+                with open(PUBLISH_HISTORY_PATH, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+                if not isinstance(records, list):
+                    records = []
+            except Exception:
+                records = []
+        else:
+            records = []
+        records.insert(0, entry)
+        _save_publish_history_unlocked(records)
+
+
+def _update_publish_history(mid, updates):
+    mid_str = str(mid or "").strip()
+    if not mid_str:
+        return
+    with _publish_history_lock:
+        if not os.path.isfile(PUBLISH_HISTORY_PATH):
+            return
+        try:
+            with open(PUBLISH_HISTORY_PATH, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            if not isinstance(records, list):
+                return
+        except Exception:
+            return
+        changed = False
+        for item in records:
+            if isinstance(item, dict) and str(item.get("mid") or "") == mid_str:
+                item.update(updates)
+                changed = True
+        if changed:
+            _save_publish_history_unlocked(records)
+
+
+@app.route("/api/publish/status", methods=["GET"])
+def api_publish_status():
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    sess = pub.ensure_session()
+    visible_opts = [
+        {"value": k, "label": v} for k, v in VISIBLE_OPTIONS.items()
+    ]
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "logged_in": bool(sess.get("logged_in")),
+                "uid": sess.get("uid") or "",
+                "screen_name": sess.get("screen_name") or "",
+                "has_xsrf": bool(sess.get("has_xsrf")),
+                "message": sess.get("message") or "",
+                "visible_options": visible_opts,
+            },
+        }
+    )
+
+
+@app.route("/api/publish/upload_image", methods=["POST"])
+def api_publish_upload_image():
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    if "file" in request.files:
+        f = request.files["file"]
+        raw = f.read()
+        res = pub.upload_image(
+            data=raw,
+            filename=f.filename or "image.jpg",
+            mime_type=f.mimetype or None,
+        )
+    else:
+        req = request.get_json(silent=True) or {}
+        file_path = req.get("file_path")
+        if not file_path:
+            return (
+                jsonify(
+                    {
+                        "code": 400,
+                        "success": False,
+                        "message": "请上传 multipart 文件 (file) 或提供 file_path",
+                    }
+                ),
+                400,
+            )
+        res = pub.upload_image(file_path=file_path)
+
+    if not res.get("ok"):
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "message": res.get("msg") or "图片上传失败",
+                    "data": res,
+                }
+            ),
+            400,
+        )
+
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": res.get("msg") or "上传成功",
+            "data": {
+                "pid": res["pid"],
+                "type": res["type"],
+                "preview_url": res["url"],
+                "large_url": res.get("large_url", ""),
+            },
+        }
+    )
+
+
+@app.route("/api/publish/post", methods=["POST"])
+def api_publish_post():
+    req = request.get_json(silent=True) or {}
+    content = req.get("content", "")
+    visible = req.get("visible", 0)
+    pics = req.get("pics")
+    images = req.get("images")
+    schedule_time = req.get("schedule_time")
+    topic_id = req.get("topic_id")
+    sync_mblog = req.get("sync_mblog", 1)
+    dry_run = bool(req.get("dry_run", False))
+
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    res = pub.publish(
+        content=content,
+        visible=visible,
+        images=images,
+        pics=pics,
+        schedule_time=schedule_time,
+        topic_id=topic_id,
+        sync_mblog=sync_mblog,
+        dry_run=dry_run,
+    )
+
+    if not res.get("ok"):
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "need_verify": bool(res.get("need_verify")),
+                    "message": res.get("msg") or "发布失败",
+                    "data": res,
+                }
+            ),
+            400,
+        )
+
+    if not dry_run:
+        raw_data = ((res.get("raw") or {}).get("data") or {}) if isinstance(res.get("raw"), dict) else {}
+        mid_val = res.get("mid") or str(raw_data.get("schedule_id") or "")
+        _record_publish_history(
+            {
+                "mid": mid_val,
+                "mblogid": res.get("mblogid") or "",
+                "url": res.get("url") or "",
+                "text_raw": res.get("text_raw") or content,
+                "visible_type": res.get("visible", 0),
+                "visible_label": res.get("visible_label", ""),
+                "pics": res.get("pics") or [],
+                "created_at": res.get("created_at")
+                or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "scheduled": bool(res.get("scheduled")),
+                "schedule_timestamp": res.get("schedule_timestamp"),
+                "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "deleted": False,
+            }
+        )
+
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": res.get("msg") or "发布成功",
+            "data": res,
+        }
+    )
+
+
+@app.route("/api/publish/can_edit/<mid>", methods=["GET"])
+def api_publish_can_edit(mid):
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    res = pub.check_can_edit(mid)
+    if not res.get("ok"):
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "message": res.get("msg") or "校验可编辑状态失败",
+                    "data": res,
+                }
+            ),
+            400,
+        )
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": res.get("msg") or "",
+            "data": res,
+        }
+    )
+
+
+@app.route("/api/publish/edit", methods=["POST"])
+def api_publish_edit():
+    req = request.get_json(silent=True) or {}
+    mid = req.get("mid")
+    content = req.get("content", "")
+    visible = req.get("visible")
+    pics = req.get("pics")
+    images = req.get("images")
+    check_first = bool(req.get("check_first", True))
+    dry_run = bool(req.get("dry_run", False))
+
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    res = pub.edit(
+        mid=mid,
+        content=content,
+        visible=visible,
+        images=images,
+        pics=pics,
+        check_first=check_first,
+        dry_run=dry_run,
+    )
+    if not res.get("ok"):
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "need_verify": bool(res.get("need_verify")),
+                    "message": res.get("msg") or "编辑失败",
+                    "data": res,
+                }
+            ),
+            400,
+        )
+
+    if not dry_run:
+        updates = {
+            "text_raw": res.get("text_raw") or content,
+            "edited_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if visible is not None and visible != "":
+            updates["visible_type"] = res.get("visible")
+            updates["visible_label"] = res.get("visible_label", "")
+        if res.get("url"):
+            updates["url"] = res["url"]
+        _update_publish_history(mid, updates)
+
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": res.get("msg") or "编辑成功",
+            "data": res,
+        }
+    )
+
+
+@app.route("/api/publish/visibility", methods=["POST"])
+def api_publish_visibility():
+    req = request.get_json(silent=True) or {}
+    mid = req.get("mid")
+    visible = req.get("visible")
+    if mid is None or visible is None:
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "message": "请提供 mid 和 visible 参数",
+                }
+            ),
+            400,
+        )
+
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    res = pub.modify_visibility(mid=mid, visible=visible)
+    if not res.get("ok"):
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "message": res.get("msg") or "修改可见性失败",
+                    "data": res,
+                }
+            ),
+            400,
+        )
+
+    _update_publish_history(
+        mid,
+        {
+            "visible_type": res.get("visible"),
+            "visible_label": res.get("visible_label", ""),
+        },
+    )
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": res.get("msg") or "修改可见范围成功",
+            "data": res,
+        }
+    )
+
+
+@app.route("/api/publish/delete", methods=["POST"])
+def api_publish_delete():
+    req = request.get_json(silent=True) or {}
+    mid = req.get("mid")
+    if not mid:
+        return (
+            jsonify({"code": 400, "success": False, "message": "请提供微博 mid"}),
+            400,
+        )
+
+    pub = WeiboPublisher(project_root=BASE_DIR)
+    res = pub.delete(mid=mid)
+    if not res.get("ok"):
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "success": False,
+                    "message": res.get("msg") or "删除微博失败",
+                    "data": res,
+                }
+            ),
+            400,
+        )
+
+    _update_publish_history(
+        mid,
+        {
+            "deleted": True,
+            "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    )
+    return jsonify(
+        {
+            "code": 200,
+            "success": True,
+            "message": res.get("msg") or "删除成功",
+            "data": res,
+        }
+    )
+
+
+@app.route("/api/publish/posts", methods=["GET"])
+def api_publish_posts():
+    source = (request.args.get("source") or "remote").strip().lower()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
+    history = _load_publish_history()
+    uid = ""
+    screen_name = ""
+    remote_error = None
+    items = history
+
+    if source != "local":
+        pub = WeiboPublisher(project_root=BASE_DIR)
+        res = pub.list_my_posts(page=page)
+        if res.get("ok"):
+            items = res.get("items") or []
+            uid = res.get("uid") or ""
+            screen_name = res.get("screen_name") or ""
+        else:
+            remote_error = res.get("msg") or "获取远端微博列表失败"
+            items = history
+
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "items": items,
+                "history": history,
+                "source": source,
+                "page": page,
+                "uid": uid,
+                "screen_name": screen_name,
+                "remote_error": remote_error,
+            },
+        }
+    )
 
 
 # ==========================================
