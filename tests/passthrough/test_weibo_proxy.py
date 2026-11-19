@@ -29,6 +29,8 @@ from util.passthrough import (  # noqa: E402
 )
 
 def _import_service_isolated():
+    if "service" in sys.modules:
+        return sys.modules["service"]
     tests_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     saved_path = list(sys.path)
     saved_http = sys.modules.get("http")
@@ -48,6 +50,8 @@ def _import_service_isolated():
         sys.path[:] = saved_path
         if saved_http is not None:
             sys.modules["http"] = saved_http
+        else:
+            sys.modules.pop("http", None)
 
 
 try:
@@ -522,6 +526,97 @@ class WeiboPassthroughPicuploadAndMobileTest(unittest.TestCase):
         st_bad, _, _ = proxy.proxy_mobile_weibo("api/statuses/update")
         self.assertEqual(st_bad, 403)
 
+    def test_webim_passthrough_injects_source_headers_and_retries_on_21301(self):
+        state = {"calls": 0}
+
+        def _webim_handler(m, u, s, **kw):
+            state["calls"] += 1
+            if "error21301.json" in u and state["calls"] == 1:
+                return _FakeResponse(
+                    {"error": "sub invalid", "error_code": 21301, "request": "/2/direct_messages/contacts.json"},
+                    status_code=500,
+                )
+            return _FakeResponse({"result": True, "url": u, "method": m})
+
+        sess = _FakeSession(handlers=[(lambda m, u, kw: "api.weibo.com/webim/" in u, _webim_handler)])
+        proxy, tmpdir = _make_proxy_with_tmp_cookie("SUB=sub_im", sess, auto_refresh=True)
+        self._track_tmp(tmpdir)
+
+        # 1. GET auto-injects source=209678993 & t=<epoch_ms> and Referer: https://api.weibo.com/chat
+        st_g, headers_g, _ = proxy.proxy_webim(
+            "2/direct_messages/contacts.json",
+            method="GET",
+            query_params={"count": "20"},
+        )
+        self.assertEqual(st_g, 200)
+        self.assertEqual(
+            headers_g["X-Weibo-Passthrough-Upstream"],
+            "https://api.weibo.com/webim/2/direct_messages/contacts.json",
+        )
+        _, _, kw_g = sess.calls[-1]
+        param_dict = dict(kw_g["params"])
+        self.assertEqual(param_dict["count"], "20")
+        self.assertEqual(param_dict["source"], "209678993")
+        self.assertTrue(param_dict["t"].isdigit())
+        self.assertEqual(kw_g["headers"]["Referer"], "https://api.weibo.com/chat")
+        self.assertEqual(kw_g["headers"]["Origin"], "https://api.weibo.com")
+        self.assertNotIn("X-XSRF-TOKEN", kw_g["headers"])
+
+        # 2. POST JSON converts to x-www-form-urlencoded and injects source=209678993
+        st_p, _, _ = proxy.proxy_webim(
+            "2/direct_messages/new.json",
+            method="POST",
+            json_body={"uid": "1669879400", "text": "hello", "extensions": {"clientid": "abc"}},
+        )
+        self.assertEqual(st_p, 200)
+        _, _, kw_p = sess.calls[-1]
+        parsed_p = parse_qs(kw_p["data"])
+        self.assertEqual(parsed_p["uid"], ["1669879400"])
+        self.assertEqual(parsed_p["text"], ["hello"])
+        self.assertEqual(parsed_p["source"], ["209678993"])
+        self.assertEqual(parsed_p["extensions"], ['{"clientid": "abc"}'])
+
+        # 3. POST raw x-www-form-urlencoded appends &source=209678993 when missing
+        st_raw, _, _ = proxy.proxy_webim(
+            "2/direct_messages/recall.json",
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            body=b"id=53670001",
+        )
+        self.assertEqual(st_raw, 200)
+        self.assertEqual(sess.calls[-1][2]["data"], b"id=53670001&source=209678993")
+
+        # 4. POST uploadx.json multipart keeps source in query params & form
+        fake_upload = types.SimpleNamespace(
+            filename="pic.jpg",
+            mimetype="image/jpeg",
+            stream=io.BytesIO(b"JPG_DATA"),
+        )
+        st_up, _, _ = proxy.proxy_webim(
+            "uploadx.json",
+            method="POST",
+            query_params={"uid": "1669879400"},
+            files={"imageName": fake_upload},
+        )
+        self.assertEqual(st_up, 200)
+        _, _, kw_up = sess.calls[-1]
+        self.assertEqual(dict(kw_up["params"])["source"], "209678993")
+        self.assertIn("imageName", kw_up["files"])
+
+        # 5. error_code == 21301 triggers browser cookie refresh and retries
+        state["calls"] = 0
+        with mock.patch(
+            "util.passthrough.weibo_proxy.get_cookie_auto_config",
+            return_value={"enabled": True, "refresh_on_expire": True, "browser": "chrome"},
+        ), mock.patch(
+            "util.passthrough.weibo_proxy.extract_and_save_cookie",
+            return_value={"success": True, "valid": True, "cookie": "SUB=fresh_im_sub"},
+        ) as m_ext:
+            st_r, _, _ = proxy.proxy_webim("2/direct_messages/error21301.json", method="GET")
+        self.assertEqual(st_r, 200)
+        self.assertEqual(state["calls"], 2)
+        m_ext.assert_called_once()
+
 
 @unittest.skipIf(service is None, "Flask is not installed")
 class ServicePassthroughIntegrationTest(unittest.TestCase):
@@ -608,6 +703,31 @@ class ServicePassthroughIntegrationTest(unittest.TestCase):
             self.assertEqual(cfg_js["code"], 200)
             self.assertTrue(cfg_js["is_custom_config"])
             self.assertNotIn("X-Weibo-Passthrough-Upstream", r_cfg.headers)
+
+            # /webim/<path:subpath> native WebIM passthrough
+            r_im_get = self.client.get("/webim/2/direct_messages/contacts.json?count=10")
+            self.assertEqual(r_im_get.status_code, 200)
+            self.assertEqual(
+                r_im_get.headers["X-Weibo-Passthrough-Upstream"],
+                "https://api.weibo.com/webim/2/direct_messages/contacts.json",
+            )
+            r_im_post = self.client.post(
+                "/webim/2/direct_messages/new.json",
+                json={"uid": "1669879400", "text": "hi from passthrough"},
+            )
+            self.assertEqual(r_im_post.status_code, 200)
+            self.assertEqual(
+                self.sess.calls[-1][1],
+                "https://api.weibo.com/webim/2/direct_messages/new.json",
+            )
+
+            # /api/passthrough/info self-describing gateway metadata
+            r_info = self.client.get("/api/passthrough/info")
+            self.assertEqual(r_info.status_code, 200)
+            info_js = json.loads(r_info.data)
+            self.assertEqual(info_js["code"], 200)
+            self.assertTrue(info_js["data"]["cookie_configured"])
+            self.assertEqual(len(info_js["data"]["upstreams"]), 4)
 
 
 if __name__ == "__main__":

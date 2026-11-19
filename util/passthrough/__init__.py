@@ -1,17 +1,41 @@
-"""Native Weibo pass-through proxy helpers for PC web (weibo.com / picupload) and m.weibo.cn."""
+"""Native Weibo pass-through proxy helpers for PC web (weibo.com / picupload), WebIM (api.weibo.com/webim), and m.weibo.cn."""
 
 from util.passthrough.weibo_proxy import (
+    ALLOWED_IMAGE_DOMAIN_SUFFIXES,
     ALLOWED_MOBILE_EXACT_PATHS,
+    DEFAULT_CLIENT_VERSION,
+    DEFAULT_SERVER_VERSION,
+    DEFAULT_USER_AGENT,
+    DEFAULT_WEBIM_SOURCE,
+    MIME_BY_EXT,
+    PLACEHOLDER_COOKIES,
     WeiboPassthroughProxy,
+    _default_project_root,
+    _guess_mime,
     clean_weibo_params,
     is_allowed_mobile_path,
+    is_allowed_weibo_image_url,
     is_safe_subpath,
+    normalize_weibo_image_url,
+    resolve_active_cookie,
 )
 
 __all__ = [
+    "ALLOWED_IMAGE_DOMAIN_SUFFIXES",
     "ALLOWED_MOBILE_EXACT_PATHS",
+    "DEFAULT_CLIENT_VERSION",
+    "DEFAULT_SERVER_VERSION",
+    "DEFAULT_USER_AGENT",
+    "DEFAULT_WEBIM_SOURCE",
+    "MIME_BY_EXT",
+    "PLACEHOLDER_COOKIES",
     "WeiboPassthroughProxy",
+    "_default_project_root",
+    "_guess_mime",
     "clean_weibo_params",
     "is_allowed_mobile_path",
+    "is_allowed_weibo_image_url",
     "is_safe_subpath",
+    "normalize_weibo_image_url",
+    "resolve_active_cookie",
 ]

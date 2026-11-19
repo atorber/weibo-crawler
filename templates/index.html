@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Weibo Crawler 控制台 - 微博数据采集管理系统</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
-  <link rel="stylesheet" href="/static/css/console.css?v=5">
+  <link rel="stylesheet" href="/static/css/console.css?v=7">
 </head>
 
 <body>
@@ -20,13 +20,10 @@
       </div>
 
       <ul class="nav-menu">
+        <li class="nav-section-title" style="margin-top: 4px;">🕷️ 爬虫任务与存档查询</li>
         <li class="nav-item active" data-tab="dashboard">
           <div class="nav-icon">📊</div>
           <span>总览控制</span>
-        </li>
-        <li class="nav-item" data-tab="publish">
-          <div class="nav-icon">✍️</div>
-          <span>发布管理</span>
         </li>
         <li class="nav-item" data-tab="targets">
           <div class="nav-icon">👥</div>
@@ -48,9 +45,19 @@
           <div class="nav-icon">🗄️</div>
           <span>数据预览</span>
         </li>
+
+        <li class="nav-section-title">🔌 透传网关与微博客户端</li>
+        <li class="nav-item" data-tab="publish">
+          <div class="nav-icon">✍️</div>
+          <span>发布管理</span>
+        </li>
+        <li class="nav-item" data-tab="chat">
+          <div class="nav-icon">💬</div>
+          <span>私信管理</span>
+        </li>
         <li class="nav-item" data-tab="api">
           <div class="nav-icon">🔌</div>
-          <span>API 文档</span>
+          <span>透传与 API</span>
         </li>
 
         <li class="nav-section-title">资源与社区</li>
@@ -382,6 +389,137 @@
               <span style="font-size: 0.85rem; color: var(--text-muted);" id="publish-posts-page">第 1 页</span>
               <button class="btn btn-secondary btn-sm" id="btn-posts-next">下一页</button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 1.8: Direct Message & Group Chat Center -->
+      <section class="page-view" id="view-chat">
+        <div class="content-box" style="margin-bottom: 16px;">
+          <div class="content-box-header" style="padding: 14px 20px;">
+            <div>
+              <h3 style="font-size: 1.02rem; font-weight: 700;">💬 微博私信与群聊工作台 (WebIM)</h3>
+              <p style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">
+                对接 api.weibo.com/chat 原生 WebIM 协议：支持联系人/群聊列表、历史记录拉取、文字与图片/文件发送、消息撤回、删除及一键已读
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button class="btn btn-secondary btn-sm" id="btn-chat-check-auth">🔍 校验登录态</button>
+              <button class="btn btn-secondary btn-sm" id="btn-chat-refresh-contacts">🔄 刷新会话</button>
+            </div>
+          </div>
+          <div style="padding: 0 20px 14px;">
+            <div id="chat-auth-bar" class="publish-auth-bar" style="margin-bottom: 0;">
+              <span>正在检查微博私信 WebIM 登录状态...</span>
+            </div>
+            <div id="chat-passthrough-trace" class="chat-passthrough-trace" title="本页所有操作均经由 /webim/* 原生透传接口转发至 api.weibo.com">
+              🔌 透传链路：尚无请求
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-workspace-grid">
+          <!-- Left: Contacts & Search -->
+          <div class="content-box chat-contacts-panel">
+            <div style="padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-primary btn-sm" id="btn-chat-box-normal" style="flex: 1;">👥 全部会话</button>
+                <button class="btn btn-secondary btn-sm" id="btn-chat-box-unfollow" style="flex: 1;">📥 未关注人私信</button>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <input type="text" class="form-control" id="chat-search-input" placeholder="搜索联系人或群聊..." style="padding: 6px 10px; font-size: 0.83rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-chat-search">🔍</button>
+              </div>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="text" class="form-control" id="chat-manual-target" placeholder="直接输入 UID 或群号 GID..." style="padding: 6px 10px; font-size: 0.82rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-chat-open-target">打开</button>
+              </div>
+            </div>
+            <div id="chat-contacts-list" class="chat-contacts-list">
+              <div style="text-align: center; color: var(--text-dim); padding: 32px 14px; font-size: 0.85rem;">加载会话列表中...</div>
+            </div>
+          </div>
+
+          <!-- Right: Conversation & Composer -->
+          <div class="content-box chat-conversation-panel">
+            <div class="content-box-header" style="padding: 14px 20px;">
+              <div>
+                <h4 style="font-size: 0.98rem; font-weight: 700;" id="chat-active-title">请选择左侧会话或输入目标 UID / GID</h4>
+                <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 2px;" id="chat-active-subtitle">支持单聊 (UID &lt; 15 位) 与群聊 (GID &ge; 15 位)</div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button class="btn btn-secondary btn-sm" id="btn-chat-mark-read" disabled>✅ 标记已读</button>
+                <button class="btn btn-secondary btn-sm" id="btn-chat-delete-conv" disabled>🗑️ 删除会话</button>
+                <button class="btn btn-secondary btn-sm" id="btn-chat-refresh-msgs" disabled>🔄 刷新消息</button>
+              </div>
+            </div>
+
+            <div id="chat-messages-box" class="chat-messages-box">
+              <div style="text-align: center; color: var(--text-dim); padding: 60px 20px; font-size: 0.88rem;">
+                👈 从左侧列表点击任意联系人/群聊即可查看私信对话并发送消息
+              </div>
+            </div>
+
+            <div class="chat-composer">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <input type="file" id="chat-file-input" style="display: none;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-chat-pick-file">📎 添加图片/附件</button>
+                  <span id="chat-file-badge" style="font-size: 0.8rem; color: var(--accent-cyan); display: none;"></span>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-chat-clear-file" style="display: none; padding: 2px 8px;">✕</button>
+                </div>
+                <span style="font-size: 0.78rem; color: var(--text-dim);">发送后 3 分钟内支持撤回</span>
+              </div>
+              <textarea class="form-control" id="chat-input-text" rows="3" placeholder="输入私信或群聊内容... (Ctrl/Cmd + Enter 快捷发送)" style="margin-bottom: 10px;"></textarea>
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                <div id="chat-send-result" style="font-size: 0.82rem; color: var(--text-muted); flex: 1;"></div>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-chat-dry-run">🧪 干跑校验</button>
+                  <button type="button" class="btn btn-primary btn-sm" id="btn-chat-send">🚀 发送私信</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- WebIM Native Pass-Through Debug Console (calls /webim/* directly) -->
+        <div class="content-box" style="margin-top: 16px;">
+          <div class="content-box-header" style="padding: 14px 20px;">
+            <div>
+              <h4 style="font-size: 0.98rem; font-weight: 700;">🧪 WebIM 原生透传调试台</h4>
+              <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 2px;">
+                浏览器直接请求本服务 <code>/webim/&lt;path&gt;</code>，等价于 <code>https://api.weibo.com/webim/&lt;path&gt;</code>（自动注入 Cookie、source=209678993、t、Referer）
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-webim-raw-toggle">展开</button>
+          </div>
+          <div id="webim-raw-panel" style="display: none; padding: 14px 20px;">
+            <div style="display: grid; grid-template-columns: 110px 1fr; gap: 10px; margin-bottom: 10px;">
+              <select class="form-control" id="webim-raw-method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+              </select>
+              <input type="text" class="form-control" id="webim-raw-path" list="webim-raw-presets" value="query_primary_info.json" placeholder="例如 2/direct_messages/contacts.json">
+              <datalist id="webim-raw-presets">
+                <option value="query_primary_info.json"></option>
+                <option value="2/direct_messages/contacts.json"></option>
+                <option value="2/direct_messages/public/contacts.json"></option>
+                <option value="2/direct_messages/conversation.json"></option>
+                <option value="2/direct_messages/messageboxsearch.json"></option>
+                <option value="2/direct_messages/new.json"></option>
+                <option value="2/direct_messages/recall.json"></option>
+                <option value="2/direct_messages/set_unread_count.json"></option>
+                <option value="groupchat/query_messages.json"></option>
+                <option value="groupchat/send_message.json"></option>
+              </datalist>
+            </div>
+            <label class="form-label" style="font-size: 0.8rem;">参数 (JSON 对象：GET 作为 Query，POST 作为表单)</label>
+            <textarea class="form-control" id="webim-raw-params" rows="3" style="font-family: monospace; font-size: 0.82rem;">{}</textarea>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+              <span id="webim-raw-meta" style="font-size: 0.8rem; color: var(--text-dim);"></span>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-webim-raw-send">⚡ 发送透传请求</button>
+            </div>
+            <pre id="webim-raw-output" class="chat-raw-output">// 响应将显示在这里</pre>
           </div>
         </div>
       </section>
@@ -1343,10 +1481,10 @@
           <div class="api-docs-header">
             <div>
               <h2 style="font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 10px;">
-                <span>🔌</span> RESTful API 接口中心
+                <span>🔌</span> 双层架构接口中心（Weibo 原生透传网关 & 爬虫存档查询 API）
               </h2>
               <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">
-                提供标准化 HTTP 接口供外部系统、微服务、定时脚本或自动化流水线深度集成与远程调度。
+                <strong>层面一（透传网关 & 客户端底座）</strong>：将官方域名替换为当前服务即可 1:1 调用微博原生接口或使用内置发布/私信客户端 API；<strong>层面二（爬虫任务 & 存档查询）</strong>：远程调度采集任务并检索归档数据。
               </p>
             </div>
             <div class="api-base-url-pill">
@@ -1358,13 +1496,15 @@
           <div class="api-filter-toolbar">
             <div class="api-category-tabs">
               <button class="api-cat-btn active" data-cat="all">全部 (ALL)</button>
-              <button class="api-cat-btn" data-cat="service">进程调度</button>
-              <button class="api-cat-btn" data-cat="targets">目标管理</button>
-              <button class="api-cat-btn" data-cat="config">配置中心</button>
-              <button class="api-cat-btn" data-cat="cookie">Cookie认证</button>
+              <button class="api-cat-btn" data-cat="passthrough">🔌 原生透传网关</button>
+              <button class="api-cat-btn" data-cat="publish">✍️ 发布客户端</button>
+              <button class="api-cat-btn" data-cat="chat">💬 私信客户端</button>
+              <button class="api-cat-btn" data-cat="service">🕷️ 爬虫调度</button>
+              <button class="api-cat-btn" data-cat="targets">👥 目标管理</button>
+              <button class="api-cat-btn" data-cat="data">🗄️ 存档查询与日志</button>
+              <button class="api-cat-btn" data-cat="config">⚙️ 配置中心</button>
+              <button class="api-cat-btn" data-cat="cookie">🔑 Cookie认证</button>
               <button class="api-cat-btn" data-cat="test">连通测试</button>
-              <button class="api-cat-btn" data-cat="data">日志与数据</button>
-              <button class="api-cat-btn" data-cat="publish">发布管理</button>
               <button class="api-cat-btn" data-cat="legacy">经典兼容</button>
             </div>
             <div class="api-search-box">
@@ -1375,6 +1515,89 @@
 
         <!-- API Cards Container -->
         <div class="api-endpoints-container" id="api-endpoints-list">
+
+          <!-- 0. 层面一：Weibo 原生透传网关 -->
+          <div class="api-card" data-cat="passthrough" data-search="get /api/passthrough/info 透传网关 元信息 域名映射">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-get">GET</span>
+                <span class="api-path">/api/passthrough/info</span>
+              </div>
+              <span class="api-summary">【层面一】获取 Weibo 原生透传网关状态、已挂载的 4 大上游域名映射与控制请求头说明</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">调用示例</div>
+              <pre class="api-code-block"><code>curl http://127.0.0.1:15001/api/passthrough/info</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="passthrough" data-search="any /ajax/ weibo.com 原生透传 发博 评论 点赞 个人主页">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">ANY</span>
+                <span class="api-path">/ajax/&lt;path:subpath&gt;</span>
+              </div>
+              <span class="api-summary">【层面一】1:1 透传至 https://weibo.com/ajax/&lt;subpath&gt;（自动代管 Cookie、X-XSRF-TOKEN 与 JSON 转表单）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">调用示例</div>
+              <pre class="api-code-block"><code># 只需将 https://weibo.com 替换为 http://127.0.0.1:15001
+curl "http://127.0.0.1:15001/ajax/statuses/mymblog?uid=1669879400&page=1&feature=0"
+curl -X POST "http://127.0.0.1:15001/ajax/statuses/update" -H "Content-Type: application/json" -d '{"content":"透传测试","visible":1}'</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="passthrough" data-search="any /webim/ api.weibo.com 私信 群聊 webim 原生透传 209678993">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">ANY</span>
+                <span class="api-path">/webim/&lt;path:subpath&gt;</span>
+              </div>
+              <span class="api-summary">【层面一】1:1 透传至 https://api.weibo.com/webim/&lt;subpath&gt;（自动补齐 source=209678993、t、Referer 及 21301 刷新重试）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">调用示例</div>
+              <pre class="api-code-block"><code># 只需将 https://api.weibo.com 替换为 http://127.0.0.1:15001
+curl "http://127.0.0.1:15001/webim/query_primary_info.json"
+curl "http://127.0.0.1:15001/webim/2/direct_messages/contacts.json?count=20"</code></pre>
+            </div>
+          </div>
+
+          <div class="api-card" data-cat="passthrough" data-search="post /interface/upload.php pic_upload.php picupload 图床 上传 m.weibo.cn">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">ANY</span>
+                <span class="api-path">/interface/upload.php | /api/container/getIndex | /comments/hotflow</span>
+              </div>
+              <span class="api-summary">【层面一】图床原生上传透传 (picupload.weibo.com) 与移动版 H5 接口透传 (m.weibo.cn)</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">调用示例</div>
+              <pre class="api-code-block"><code>curl -X POST "http://127.0.0.1:15001/interface/upload.php" -H "Content-Type: application/octet-stream" --data-binary @photo.jpg
+curl "http://127.0.0.1:15001/api/container/getIndex?type=uid&value=1669879400"</code></pre>
+            </div>
+          </div>
+
+          <!-- 0.5 层面一：私信与群聊客户端接口 (/api/chat/*) -->
+          <div class="api-card" data-cat="chat" data-search="get post /api/chat/status contacts messages send recall delete read 私信 群聊">
+            <div class="api-card-header">
+              <div class="api-method-path">
+                <span class="method-badge method-post">API</span>
+                <span class="api-path">/api/chat/status | /contacts | /messages | /send | /recall | /delete | /read</span>
+              </div>
+              <span class="api-summary">【层面一】基于 /webim/* 透传构建的微博私信与群聊客户端接口（响应含 passthrough 透传链路追踪）</span>
+            </div>
+            <div class="api-card-body">
+              <div class="api-block-title">调用示例</div>
+              <pre class="api-code-block"><code>GET  /api/chat/status
+GET  /api/chat/contacts?count=20&keyword=测试
+GET  /api/chat/messages?uid=1669879400&count=20
+POST /api/chat/send   -> { "uid": "1669879400", "text": "你好", "dry_run": true }
+POST /api/chat/recall -> { "mid": "5367..." }
+POST /api/chat/delete -> { "mid": "5367...", "uid": "1669879400" }
+POST /api/chat/read   -> { "uid": "1669879400" }</code></pre>
+            </div>
+          </div>
 
           <!-- 1. 服务调度 -->
           <div class="api-card" data-cat="service" data-search="get /api/status 运行状态 监控 指标 pid">
@@ -1987,7 +2210,7 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/js/console.js?v=7"></script>
+  <script src="/static/js/console.js?v=9"></script>
 </body>
 
 </html>

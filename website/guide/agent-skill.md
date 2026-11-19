@@ -236,6 +236,38 @@ python skills/weibo-viewer/scripts/weibo_ctl.py publish delete --mid 53670678324
 
 ---
 
+### 8. 微博私信与群聊管理 (`chat`)
+
+底层**完全基于方式一的 `/webim/*` 原生透传接口**构建（服务在线时经由 `http://127.0.0.1:15001/webim/<path>` 透传，服务离线时复用进程内 `WeiboPassthroughProxy.proxy_webim` 透传），并额外提供 `chat raw` 直接调用任意原生 `/webim/*` 接口：
+
+```bash
+# 1. 检查私信 WebIM 登录态（加 -V 可打印底层 /webim/* 透传调用链路）
+python skills/weibo-viewer/scripts/weibo_ctl.py chat status -V
+
+# 2. 查看或搜索私信联系人与群聊会话（--unfollow 可切换未关注人私信箱）
+python skills/weibo-viewer/scripts/weibo_ctl.py chat contacts --limit 20
+python skills/weibo-viewer/scripts/weibo_ctl.py chat contacts --keyword "测试"
+
+# 3. 拉取单聊 (--uid) 或群聊 (--gid) 历史消息
+python skills/weibo-viewer/scripts/weibo_ctl.py chat messages --uid 1669879400 --limit 20
+python skills/weibo-viewer/scripts/weibo_ctl.py chat messages --gid 4912345678901234 --limit 20
+
+# 4. 干跑预检或发送单聊/群聊消息（支持 --file 携带图片或文件附件）
+python skills/weibo-viewer/scripts/weibo_ctl.py chat send --uid 1669879400 --text "你好" --dry-run
+python skills/weibo-viewer/scripts/weibo_ctl.py chat send --uid 1669879400 --text "发送图片" --file ./pic.jpg
+
+# 5. 撤回消息（3 分钟内）、删除消息/会话与标记已读
+python skills/weibo-viewer/scripts/weibo_ctl.py chat recall --mid 5367099999999999
+python skills/weibo-viewer/scripts/weibo_ctl.py chat delete --mid 5367099999999999 --uid 1669879400
+python skills/weibo-viewer/scripts/weibo_ctl.py chat read --uid 1669879400
+
+# 6. 通过透传通道直接调用任意原生 /webim/* 端点
+python skills/weibo-viewer/scripts/weibo_ctl.py chat raw --path query_primary_info.json
+python skills/weibo-viewer/scripts/weibo_ctl.py chat raw --path 2/direct_messages/contacts.json --param count=10
+```
+
+---
+
 ## 🤖 在 Agent 框架中接入使用
 
 很多传统的工具扩展需要针对不同的平台编写繁琐割裂的配置文件（如 `.cursorrules`、`CLAUDE.md`、Function Calling JSON Schema 等）。
@@ -262,6 +294,7 @@ python skills/weibo-viewer/scripts/weibo_ctl.py publish delete --mid 53670678324
    - 目标博主管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py users [list|add|remove]
    - 启停任务调度：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py start / stop / restart
    - 微博发布管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py publish [status|post|list|visibility|edit|delete]
+   - 私信与群聊管理：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py chat [status|contacts|messages|send|recall|delete|read]
    - 运行日志与Cookie：python .agents/skills/weibo-viewer/scripts/weibo_ctl.py logs / cookie
 3. 运行 `status` 子命令验证安装，完成后告诉我你已就绪，随时可以按我的指令爬取微博、发布博文或检索数据！
 ```

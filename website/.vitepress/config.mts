@@ -20,12 +20,14 @@ export default defineConfig({
     nav: [
       { text: '首页', link: '/' },
       { text: '使用指南', link: '/guide/intro' },
+      { text: '🔌 透传网关', link: '/guide/passthrough' },
       { text: '配置参数', link: '/guide/config' },
       { text: '数据存储', link: '/guide/database' },
       { text: 'API 服务', link: '/api/' },
       {
         text: '更多',
         items: [
+          { text: '🔌 Weibo 原生透传网关', link: '/guide/passthrough' },
           { text: '✍️ 发布与博文管理', link: '/guide/publish' },
           { text: '🤖 Agent 技能', link: '/guide/agent-skill' },
           { text: '获取 User ID', link: '/guide/user-id' },
@@ -39,25 +41,26 @@ export default defineConfig({
     sidebar: {
       '/guide/': [
         {
-          text: '起步',
+          text: '架构与起步',
           items: [
-            { text: '项目简介', link: '/guide/intro' },
-            { text: '快速开始', link: '/guide/quick-start' },
-            { text: '输出内容与格式', link: '/guide/output' },
+            { text: '项目简介（双层架构）', link: '/guide/intro' },
+            { text: '快速开始', link: '/guide/quick-start' }
+          ]
+        },
+        {
+          text: '层面一：透传网关与客户端底座',
+          items: [
+            { text: '🔌 Weibo 原生透传网关与客户端开发', link: '/guide/passthrough' },
             { text: '✍️ 微博发布与博文管理', link: '/guide/publish' }
           ]
         },
         {
-          text: '配置与认证',
+          text: '层面二：爬虫任务与存档查询',
           items: [
+            { text: '输出内容与格式', link: '/guide/output' },
             { text: '完整配置参数', link: '/guide/config' },
             { text: '如何获取 User ID', link: '/guide/user-id' },
-            { text: 'Cookie 获取与验证', link: '/guide/cookie' }
-          ]
-        },
-        {
-          text: '存储与进阶',
-          items: [
+            { text: 'Cookie 获取与验证', link: '/guide/cookie' },
             { text: '数据库配置 (MySQL/MongoDB/SQLite)', link: '/guide/database' },
             { text: '定期自动增量爬取', link: '/guide/automation' },
             { text: 'Docker 容器化部署', link: '/guide/docker' },

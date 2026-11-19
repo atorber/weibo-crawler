@@ -44,6 +44,7 @@ from util.browser_cookie import (
     get_cookie_auto_config,
     verify_cookie_string,
 )
+from util.chat import WeiboChatClient, is_group_id
 from util.config import config_paths
 from util.passthrough import WeiboPassthroughProxy
 from util.publish.weibo_publisher import (
@@ -770,6 +771,7 @@ def add_no_cache_headers(response):
 @app.route("/console")
 @app.route("/dashboard")
 @app.route("/publish")
+@app.route("/chat")
 @app.route("/targets")
 @app.route("/settings")
 @app.route("/output")
@@ -1954,6 +1956,276 @@ def passthrough_mobile_detail(weibo_id):
 @app.route("/m/api/config", methods=["GET"])
 def passthrough_mobile_api_config():
     return _serve_mobile_passthrough("api/config")
+
+
+@app.route(
+    "/webim/<path:subpath>",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+)
+def passthrough_webim(subpath):
+    query_params, headers, raw_body, json_body, form_data, files = (
+        _extract_request_query_and_files()
+    )
+    status_code, resp_headers, content_bytes = passthrough_proxy.proxy_webim(
+        subpath,
+        method=request.method,
+        query_params=query_params,
+        headers=headers,
+        body=raw_body,
+        json_body=json_body,
+        form_data=form_data,
+        files=files,
+    )
+    return _build_passthrough_flask_response(status_code, resp_headers, content_bytes)
+
+
+@app.route("/api/passthrough/info", methods=["GET"])
+def api_passthrough_info():
+    """Self-describing metadata endpoint for the Layer-1 Weibo Native Pass-Through Gateway."""
+    passthrough_proxy._reload_project_cookie_if_needed()
+    has_cookie = bool(getattr(passthrough_proxy, "_cookie_str", ""))
+    has_xsrf = bool(passthrough_proxy._latest_xsrf_token())
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "architecture": {
+                    "layer_1": "Weibo 原生接口透明透传网关 & 客户端开发底座 (Pass-Through Gateway & Client SDK)",
+                    "layer_2": "微博爬虫任务调度、多介质持久化存档 & 开放数据查询引擎 (Crawler Task, Archive & Query Engine)",
+                },
+                "cookie_configured": has_cookie,
+                "has_xsrf_token": has_xsrf,
+                "auto_refresh_enabled": bool(passthrough_proxy.auto_refresh),
+                "upstreams": [
+                    {
+                        "name": "PC 网页端 AJAX (weibo-pro-next)",
+                        "local_route": "/ajax/<path:subpath>",
+                        "upstream_base": "https://weibo.com/ajax/<subpath>",
+                        "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                        "auto_injected": ["Cookie", "X-XSRF-TOKEN", "Referer: https://weibo.com/", "X-Requested-With: XMLHttpRequest"],
+                    },
+                    {
+                        "name": "私信与群聊 WebIM (pcweibochat)",
+                        "local_route": "/webim/<path:subpath>",
+                        "upstream_base": "https://api.weibo.com/webim/<subpath>",
+                        "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                        "auto_injected": ["Cookie", "source=209678993", "t=<epoch_ms>", "Referer: https://api.weibo.com/chat"],
+                    },
+                    {
+                        "name": "微博图床上传 (picupload)",
+                        "local_route": "/interface/upload.php | /interface/pic_upload.php",
+                        "upstream_base": "https://picupload.weibo.com/interface/*",
+                        "methods": ["POST"],
+                        "auto_injected": ["Cookie", "cs (CRC32)", "raw_md5", "file_size", "uid", "request_id"],
+                    },
+                    {
+                        "name": "移动版 H5 接口 (m.weibo.cn)",
+                        "local_route": "/api/container/getIndex | /comments/hotflow | /comments/hotFlowChild | /api/comments/show | /api/statuses/repostTimeline | /statuses/show | /detail/<id> | /m/api/config",
+                        "upstream_base": "https://m.weibo.cn/*",
+                        "methods": ["GET"],
+                        "auto_injected": ["Cookie", "Referer: https://m.weibo.cn/", "X-Requested-With: XMLHttpRequest"],
+                    },
+                ],
+                "control_headers": {
+                    "X-Weibo-Cookie": "单次请求临时覆盖微博 Cookie（不修改本地配置文件）",
+                    "X-Weibo-Raw-Body": "设为 1 时禁用 POST JSON 自动转 x-www-form-urlencoded",
+                    "X-Weibo-Passthrough": "设为 1 时将 /api/config 转发至 https://m.weibo.cn/api/config",
+                    "X-Weibo-Passthrough-Upstream": "响应头，返回本次透传实际命中的上游完整 URL",
+                },
+                "built_in_clients": {
+                    "publish": "/api/publish/* (WeiboPublisher)",
+                    "chat": "/api/chat/* (WeiboChatClient)",
+                },
+            },
+        }
+    )
+
+
+# ==========================================
+# Weibo Direct Message & Group Chat API Routes (/api/chat/*)
+# Built on top of the Mode 1 native pass-through: every upstream call goes through
+# passthrough_proxy.proxy_webim (same code path as /webim/<path:subpath>).
+# ==========================================
+def _parse_bool_flag(val, default=False):
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _chat_client():
+    """Create a WebIM client that shares the service-wide /webim pass-through proxy."""
+    return WeiboChatClient(project_root=BASE_DIR, proxy=passthrough_proxy)
+
+
+def _chat_response(client, res, status_code=None, ok_key="ok"):
+    ok = bool(res.get(ok_key))
+    if status_code is None:
+        status_code = 200 if ok else 400
+    trace = getattr(client, "trace", None)
+    return (
+        jsonify(
+            {
+                "code": status_code,
+                "data": res,
+                "message": res.get("message") or res.get("msg") or "",
+                "passthrough": list(trace) if isinstance(trace, list) else [],
+            }
+        ),
+        status_code,
+    )
+
+
+@app.route("/api/chat/status", methods=["GET"])
+def api_chat_status():
+    client = _chat_client()
+    res = client.check_auth()
+    # Always HTTP 200 so the console can render the login banner; body code tells the state.
+    resp, _ = _chat_response(client, res, status_code=200, ok_key="authenticated")
+    payload = resp.get_json()
+    payload["code"] = 200 if res.get("authenticated") else 401
+    return jsonify(payload), 200
+
+
+@app.route("/api/chat/contacts", methods=["GET"])
+def api_chat_contacts():
+    try:
+        count = int(request.args.get("count", 50))
+    except (ValueError, TypeError):
+        count = 50
+    try:
+        cursor = int(request.args.get("cursor", 0))
+    except (ValueError, TypeError):
+        cursor = 0
+    unfollow = _parse_bool_flag(request.args.get("unfollow"), False)
+    include_group = _parse_bool_flag(request.args.get("include_group"), True)
+    keyword = (request.args.get("keyword") or "").strip()
+
+    client = _chat_client()
+    if keyword:
+        res = client.search_contacts(keyword=keyword, count=count)
+    else:
+        res = client.list_contacts(
+            count=count,
+            cursor=cursor,
+            unfollow=unfollow,
+            include_group=include_group,
+        )
+    return _chat_response(client, res, status_code=200)
+
+
+@app.route("/api/chat/messages", methods=["GET"])
+def api_chat_messages():
+    uid = (request.args.get("uid") or "").strip()
+    gid = (request.args.get("gid") or "").strip()
+    try:
+        count = int(request.args.get("count", 20))
+    except (ValueError, TypeError):
+        count = 20
+    try:
+        max_id = int(request.args.get("max_id", 0))
+    except (ValueError, TypeError):
+        max_id = 0
+    unfollow = _parse_bool_flag(request.args.get("unfollow"), False)
+
+    target_gid = gid or (uid if is_group_id(uid) else "")
+    if not target_gid and not uid:
+        return (
+            jsonify(
+                {
+                    "code": 400,
+                    "data": {"ok": False, "messages": []},
+                    "message": "请提供联系人 uid 或群聊 gid",
+                    "passthrough": [],
+                }
+            ),
+            400,
+        )
+
+    client = _chat_client()
+    if target_gid:
+        res = client.get_group_messages(gid=target_gid, count=count, max_mid=max_id)
+    else:
+        res = client.get_conversation(
+            uid=uid, count=count, max_id=max_id, unfollow=unfollow
+        )
+    return _chat_response(client, res, status_code=200)
+
+
+@app.route("/api/chat/send", methods=["POST"])
+def api_chat_send():
+    client = _chat_client()
+    mimetype = (request.mimetype or "").lower()
+
+    if mimetype == "multipart/form-data" or request.files:
+        src = request.form
+        up_file = request.files.get("file")
+        file_bytes = None
+        filename = ""
+        if up_file and getattr(up_file, "filename", ""):
+            filename = up_file.filename
+            file_bytes = up_file.read()
+        file_path = ""
+    else:
+        src = request.get_json(silent=True) or {}
+        file_bytes = None
+        filename = ""
+        file_path = str(src.get("file_path") or "").strip()
+
+    try:
+        media_type = int(src.get("media_type") or 0)
+    except (ValueError, TypeError):
+        media_type = 0
+
+    res = client.send_message(
+        uid=str(src.get("uid") or "").strip(),
+        gid=str(src.get("gid") or "").strip(),
+        text=str(src.get("text") or ""),
+        fid=str(src.get("fid") or "").strip(),
+        media_type=media_type or None,
+        file_path=file_path or None,
+        file_bytes=file_bytes,
+        filename=filename or None,
+        at_all=_parse_bool_flag(src.get("at_all"), False),
+        dry_run=_parse_bool_flag(src.get("dry_run"), False),
+    )
+    return _chat_response(client, res)
+
+
+@app.route("/api/chat/recall", methods=["POST"])
+def api_chat_recall():
+    payload = request.get_json(silent=True) or {}
+    mid = str(payload.get("mid") or payload.get("id") or "").strip()
+    gid = str(payload.get("gid") or "").strip()
+    client = _chat_client()
+    res = client.recall_message(mid=mid, gid=gid)
+    return _chat_response(client, res)
+
+
+@app.route("/api/chat/delete", methods=["POST"])
+def api_chat_delete():
+    payload = request.get_json(silent=True) or {}
+    client = _chat_client()
+    res = client.delete_message(
+        mid=str(payload.get("mid") or payload.get("id") or "").strip(),
+        uid=str(payload.get("uid") or "").strip(),
+        gid=str(payload.get("gid") or "").strip(),
+        unfollow=_parse_bool_flag(payload.get("unfollow"), False),
+    )
+    return _chat_response(client, res)
+
+
+@app.route("/api/chat/read", methods=["POST"])
+def api_chat_read():
+    payload = request.get_json(silent=True) or {}
+    client = _chat_client()
+    res = client.mark_read(
+        uid=str(payload.get("uid") or "").strip(),
+        gid=str(payload.get("gid") or "").strip(),
+        unfollow=_parse_bool_flag(payload.get("unfollow"), False),
+    )
+    return _chat_response(client, res)
 
 
 # ==========================================

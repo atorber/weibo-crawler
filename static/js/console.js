@@ -18,7 +18,14 @@ const state = {
   publishPics: [],
   publishPostsSource: 'remote',
   publishPostsPage: 1,
-  publishStatus: null
+  publishStatus: null,
+  chatStatus: null,
+  chatContacts: [],
+  chatUnfollowBox: false,
+  chatActiveTargetId: '',
+  chatActiveTargetName: '',
+  chatActiveIsGroup: false,
+  chatSelectedFile: null
 };
 
 // DOM Content Loaded Initializer
@@ -28,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initModals();
   initControlButtons();
   initPublishCenter();
+  initChatCenter();
   initConfigCenter();
   initUsersManager();
   initLogStreamer();
@@ -91,6 +99,7 @@ function initNavigation() {
   const titles = {
     dashboard: { title: '总览控制', subtitle: '监控爬虫实时运行状态与全局任务调度' },
     publish: { title: '发布管理', subtitle: '撰写图文微博、定时发布、修改可见范围与管理个人博文' },
+    chat: { title: '私信管理', subtitle: '微博私信与群聊工作台：会话列表、历史消息、图文附件收发、撤回与已读管理' },
     targets: { title: '目标管理', subtitle: '维护微博采集目标用户队列与增量配置' },
     settings: { title: '参数配置', subtitle: '可视化调整所有爬虫参数或编辑 config.json 源码' },
     output: { title: '数据存储', subtitle: '配置结构化文本、数据库与 Webhook 目标介质及开关' },
@@ -159,6 +168,7 @@ function initNavigation() {
 
     // Tab specific refresh
     if (tab === 'publish') loadPublishView();
+    if (tab === 'chat') loadChatView();
     if (tab === 'targets') fetchUsers();
     if (tab === 'settings' || tab === 'output') fetchConfig();
     if (tab === 'logs') fetchLogs();
@@ -2346,4 +2356,516 @@ function initPublishCenter() {
     }
   });
 }
+
+// ==========================================
+// Weibo Direct Message & Group Chat Center (/chat)
+// All /api/chat/* calls are served by WeiboChatClient on top of the /webim/* pass-through;
+// the "passthrough" array in each response lists the native /webim calls that were made.
+// ==========================================
+function renderChatTrace(json) {
+  const el = document.getElementById('chat-passthrough-trace');
+  if (!el) return;
+  const trace = Array.isArray(json?.passthrough) ? json.passthrough : [];
+  if (!trace.length) return;
+  el.innerHTML = '🔌 透传链路：' + trace.map(t => {
+    const okCls = t.status && t.status < 400 ? 'trace-ok' : 'trace-err';
+    return `<span class="chat-trace-chip ${okCls}" title="${escapeHtml(t.upstream || '')}">${escapeHtml(t.method)} ${escapeHtml(t.path)} · ${escapeHtml(String(t.status))}</span>`;
+  }).join(' ');
+}
+
+function initWebimRawConsole() {
+  const toggleBtn = document.getElementById('btn-webim-raw-toggle');
+  const panel = document.getElementById('webim-raw-panel');
+  toggleBtn?.addEventListener('click', () => {
+    const open = panel.style.display !== 'none';
+    panel.style.display = open ? 'none' : 'block';
+    toggleBtn.textContent = open ? '展开' : '收起';
+  });
+
+  document.getElementById('btn-webim-raw-send')?.addEventListener('click', async () => {
+    const method = document.getElementById('webim-raw-method')?.value || 'GET';
+    const rawPath = (document.getElementById('webim-raw-path')?.value || '').trim()
+      .replace(/^https?:\/\/api\.weibo\.com/, '').replace(/^\/+/, '').replace(/^webim\//, '');
+    const out = document.getElementById('webim-raw-output');
+    const meta = document.getElementById('webim-raw-meta');
+    if (!rawPath) {
+      showToast('请输入 /webim/ 之后的接口路径', 'error');
+      return;
+    }
+    let params = {};
+    try {
+      params = JSON.parse(document.getElementById('webim-raw-params')?.value || '{}') || {};
+    } catch (err) {
+      showToast(`参数 JSON 格式错误: ${err.message}`, 'error');
+      return;
+    }
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v === null || v === undefined) return;
+      qs.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+    });
+    let url = `/webim/${rawPath}`;
+    const opts = { method };
+    if (method === 'GET') {
+      if (qs.toString()) url += `?${qs.toString()}`;
+    } else {
+      opts.headers = { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' };
+      opts.body = qs.toString();
+    }
+    if (out) out.textContent = '请求中...';
+    const started = performance.now();
+    try {
+      const res = await fetch(url, opts);
+      const text = await res.text();
+      const cost = Math.round(performance.now() - started);
+      const upstream = res.headers.get('X-Weibo-Passthrough-Upstream') || '';
+      if (meta) meta.textContent = `${method} ${url} → HTTP ${res.status} · ${cost}ms${upstream ? ' · 上游 ' + upstream : ''}`;
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { /* non-JSON */ }
+      if (out) out.textContent = pretty;
+    } catch (err) {
+      if (out) out.textContent = `请求失败: ${err.message}`;
+    }
+  });
+}
+async function loadChatView() {
+  await Promise.all([fetchChatStatus(), fetchChatContacts()]);
+  if (state.chatActiveTargetId) {
+    await fetchChatMessages();
+  }
+}
+
+async function fetchChatStatus() {
+  const bar = document.getElementById('chat-auth-bar');
+  if (!bar) return;
+  try {
+    const res = await fetch('/api/chat/status');
+    const json = await res.json();
+    renderChatTrace(json);
+    const data = json.data || {};
+    state.chatStatus = data;
+    if (data.authenticated) {
+      const avatar = data.avatar_hd ? `<img src="${escapeHtml(getProxiedWeiboImageUrl(data.avatar_hd))}" alt="avatar" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;margin-right:6px;">` : '';
+      bar.className = 'publish-auth-bar auth-ok';
+      bar.innerHTML = `<span>✅ ${avatar}WebIM 已连接：<strong>${escapeHtml(data.screen_name || data.uid)}</strong> (UID: <code>${escapeHtml(data.uid)}</code>)</span><span style="font-size:0.78rem;opacity:0.85;">接口源: api.weibo.com/webim (source=209678993)</span>`;
+    } else {
+      bar.className = 'publish-auth-bar auth-warn';
+      bar.innerHTML = `<span>⚠️ ${escapeHtml(data.message || '私信 WebIM 未登录或 Cookie 已失效')}</span><a href="/settings" style="color:var(--accent-cyan);font-size:0.82rem;">前往配置 Cookie →</a>`;
+    }
+  } catch (err) {
+    bar.className = 'publish-auth-bar auth-warn';
+    bar.innerHTML = `<span>❌ 检查私信登录态失败: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+async function fetchChatContacts() {
+  const listEl = document.getElementById('chat-contacts-list');
+  if (!listEl) return;
+  const kw = (document.getElementById('chat-search-input')?.value || '').trim();
+  const params = new URLSearchParams({
+    count: '50',
+    unfollow: state.chatUnfollowBox ? '1' : '0',
+    include_group: '1'
+  });
+  if (kw) params.set('keyword', kw);
+
+  try {
+    const res = await fetch(`/api/chat/contacts?${params.toString()}`);
+    const json = await res.json();
+    renderChatTrace(json);
+    const data = json.data || {};
+    const contacts = data.contacts || [];
+    state.chatContacts = contacts;
+
+    if (!contacts.length) {
+      listEl.innerHTML = `<div style="text-align:center;color:var(--text-dim);padding:32px 14px;font-size:0.84rem;">${escapeHtml(data.message || '暂无私信会话')}</div>`;
+      return;
+    }
+
+    listEl.innerHTML = contacts.map(c => {
+      const id = String(c.id || '');
+      const activeClass = id === state.chatActiveTargetId ? 'active' : '';
+      const badgeType = c.is_group ? '<span class="badge-tag" style="font-size:0.68rem;padding:1px 6px;">群聊</span>' : '';
+      const unreadBadge = c.unread_count > 0
+        ? `<span class="chat-unread-badge">${c.unread_count > 99 ? '99+' : c.unread_count}</span>`
+        : '';
+      const avatarUrl = c.avatar ? getProxiedWeiboImageUrl(c.avatar) : '/static/img/logo.svg';
+      const snippet = c.last_text || (c.is_group ? `群号: ${id}` : `UID: ${id}`);
+      return `
+        <div class="chat-contact-item ${activeClass}" data-id="${escapeHtml(id)}" data-name="${escapeHtml(c.name || id)}" data-group="${c.is_group ? '1' : '0'}">
+          <img src="${escapeHtml(avatarUrl)}" alt="avatar" class="chat-contact-avatar" onerror="this.src='/static/img/logo.svg'">
+          <div class="chat-contact-body">
+            <div class="chat-contact-top">
+              <span class="chat-contact-name">${escapeHtml(c.name || id)} ${badgeType}</span>
+              ${unreadBadge}
+            </div>
+            <div class="chat-contact-snippet">${escapeHtml(snippet)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listEl.querySelectorAll('.chat-contact-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const tid = el.getAttribute('data-id') || '';
+        const tname = el.getAttribute('data-name') || tid;
+        const isGroup = el.getAttribute('data-group') === '1';
+        selectChatTarget(tid, tname, isGroup);
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div style="text-align:center;color:var(--accent-rose);padding:24px;font-size:0.84rem;">加载会话失败: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function selectChatTarget(targetId, targetName = '', isGroup = null) {
+  const cleanId = String(targetId || '').trim();
+  if (!cleanId) return;
+  const groupFlag = isGroup !== null ? Boolean(isGroup) : (cleanId.length >= 15);
+  state.chatActiveTargetId = cleanId;
+  state.chatActiveTargetName = targetName || cleanId;
+  state.chatActiveIsGroup = groupFlag;
+
+  const titleEl = document.getElementById('chat-active-title');
+  const subEl = document.getElementById('chat-active-subtitle');
+  if (titleEl) {
+    titleEl.textContent = `${state.chatActiveTargetName} ${groupFlag ? '(群聊)' : '(私信)'}`;
+  }
+  if (subEl) {
+    subEl.textContent = `${groupFlag ? 'GID' : 'UID'}: ${cleanId}${state.chatUnfollowBox ? ' · 未关注人私信箱' : ''}`;
+  }
+
+  ['btn-chat-mark-read', 'btn-chat-delete-conv', 'btn-chat-refresh-msgs'].forEach(btnId => {
+    const b = document.getElementById(btnId);
+    if (b) b.disabled = false;
+  });
+
+  document.querySelectorAll('.chat-contact-item').forEach(el => {
+    if (el.getAttribute('data-id') === cleanId) {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
+
+  fetchChatMessages();
+}
+
+async function fetchChatMessages() {
+  const box = document.getElementById('chat-messages-box');
+  if (!box || !state.chatActiveTargetId) return;
+
+  const params = new URLSearchParams({
+    count: '30',
+    unfollow: state.chatUnfollowBox ? '1' : '0'
+  });
+  if (state.chatActiveIsGroup) {
+    params.set('gid', state.chatActiveTargetId);
+  } else {
+    params.set('uid', state.chatActiveTargetId);
+  }
+
+  try {
+    const res = await fetch(`/api/chat/messages?${params.toString()}`);
+    const json = await res.json();
+    renderChatTrace(json);
+    const data = json.data || {};
+    const messages = (data.messages || []).slice().reverse();
+
+    if (!messages.length) {
+      box.innerHTML = `<div style="text-align:center;color:var(--text-dim);padding:48px 20px;font-size:0.86rem;">${escapeHtml(data.message || '暂无历史消息')}</div>`;
+      return;
+    }
+
+    const myUid = String(state.chatStatus?.uid || '');
+    box.innerHTML = messages.map(m => {
+      const mid = String(m.mid || '');
+      const senderUid = String(m.sender_uid || '');
+      const isMine = myUid && senderUid === myUid;
+      const alignClass = isMine ? 'chat-msg-mine' : 'chat-msg-other';
+      const fidsBadge = (m.fids && m.fids.length)
+        ? `<div style="margin-top:6px;font-size:0.76rem;color:var(--accent-cyan);">📎 附件 FID: <code>${escapeHtml(m.fids.join(', '))}</code> (media_type=${escapeHtml(String(m.media_type || 0))})</div>`
+        : '';
+      return `
+        <div class="chat-msg-item ${alignClass}" data-mid="${escapeHtml(mid)}">
+          <div class="chat-msg-meta">
+            <strong>${escapeHtml(m.sender_name || senderUid || '未知用户')}</strong>
+            <span>${escapeHtml(m.created_at || '')}</span>
+            <span style="opacity:0.65;">MID: ${escapeHtml(mid)}</span>
+          </div>
+          <div class="chat-msg-bubble">
+            <div class="chat-msg-text">${escapeHtml(m.text || '(空消息或富媒体消息)')}</div>
+            ${fidsBadge}
+          </div>
+          <div class="chat-msg-actions">
+            ${isMine ? `<button type="button" class="btn-link-action chat-action-recall" data-mid="${escapeHtml(mid)}">↩️ 撤回</button>` : ''}
+            <button type="button" class="btn-link-action chat-action-delete" data-mid="${escapeHtml(mid)}">🗑️ 删除</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    box.scrollTop = box.scrollHeight;
+
+    box.querySelectorAll('.chat-action-recall').forEach(btn => {
+      btn.addEventListener('click', () => handleChatRecall(btn.getAttribute('data-mid')));
+    });
+    box.querySelectorAll('.chat-action-delete').forEach(btn => {
+      btn.addEventListener('click', () => handleChatDeleteMsg(btn.getAttribute('data-mid')));
+    });
+  } catch (err) {
+    box.innerHTML = `<div style="text-align:center;color:var(--accent-rose);padding:32px;font-size:0.85rem;">加载消息失败: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function submitChatMessage(dryRun = false) {
+  const resultEl = document.getElementById('chat-send-result');
+  const textEl = document.getElementById('chat-input-text');
+  const sendBtn = document.getElementById('btn-chat-send');
+  const dryBtn = document.getElementById('btn-chat-dry-run');
+
+  const manualInput = (document.getElementById('chat-manual-target')?.value || '').trim();
+  if (!state.chatActiveTargetId && manualInput) {
+    selectChatTarget(manualInput, manualInput, manualInput.length >= 15);
+  }
+  if (!state.chatActiveTargetId) {
+    showToast('请先选择左侧联系人/群聊，或输入目标 UID/GID', 'error');
+    return;
+  }
+
+  const text = (textEl?.value || '').trim();
+  if (!text && !state.chatSelectedFile) {
+    showToast('请输入私信文字内容或选择要发送的附件', 'error');
+    return;
+  }
+
+  if (sendBtn) sendBtn.disabled = true;
+  if (dryBtn) dryBtn.disabled = true;
+  if (resultEl) resultEl.textContent = dryRun ? '🧪 正在执行干跑校验...' : '🚀 正在发送消息...';
+
+  try {
+    let res;
+    if (state.chatSelectedFile) {
+      const formData = new FormData();
+      if (state.chatActiveIsGroup) {
+        formData.append('gid', state.chatActiveTargetId);
+      } else {
+        formData.append('uid', state.chatActiveTargetId);
+      }
+      formData.append('text', text);
+      formData.append('dry_run', dryRun ? '1' : '0');
+      formData.append('file', state.chatSelectedFile);
+      res = await fetch('/api/chat/send', { method: 'POST', body: formData });
+    } else {
+      const payload = {
+        text,
+        dry_run: dryRun
+      };
+      if (state.chatActiveIsGroup) {
+        payload.gid = state.chatActiveTargetId;
+      } else {
+        payload.uid = state.chatActiveTargetId;
+      }
+      res = await fetch('/api/chat/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    const json = await res.json();
+    renderChatTrace(json);
+    const data = json.data || {};
+    if (res.ok && data.ok) {
+      showToast(data.message || (dryRun ? '干跑校验通过' : '私信发送成功'), 'success');
+      if (resultEl) {
+        resultEl.innerHTML = `<span style="color:var(--accent-emerald);">✅ ${escapeHtml(data.message || '成功')} ${data.mid ? `(MID: ${escapeHtml(String(data.mid))})` : ''}</span>`;
+      }
+      if (!dryRun) {
+        if (textEl) textEl.value = '';
+        clearChatSelectedFile();
+        await fetchChatMessages();
+        await fetchChatContacts();
+      }
+    } else {
+      const msg = data.message || json.message || '发送失败';
+      showToast(msg, 'error');
+      if (resultEl) {
+        resultEl.innerHTML = `<span style="color:var(--accent-rose);">❌ ${escapeHtml(msg)}</span>`;
+      }
+    }
+  } catch (err) {
+    showToast(`发送异常: ${err.message}`, 'error');
+    if (resultEl) resultEl.textContent = `❌ 发送异常: ${err.message}`;
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+    if (dryBtn) dryBtn.disabled = false;
+  }
+}
+
+async function handleChatRecall(mid) {
+  if (!mid) return;
+  if (!confirm(`确定撤回消息 MID: ${mid} 吗？（仅发送后 3 分钟内支持撤回）`)) return;
+  try {
+    const payload = { mid };
+    if (state.chatActiveIsGroup) payload.gid = state.chatActiveTargetId;
+    const res = await fetch('/api/chat/recall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    renderChatTrace(json);
+    if (res.ok && json.data?.ok) {
+      showToast(json.message || '消息已撤回', 'success');
+      fetchChatMessages();
+    } else {
+      showToast(json.message || '撤回失败', 'error');
+    }
+  } catch (err) {
+    showToast(`撤回异常: ${err.message}`, 'error');
+  }
+}
+
+async function handleChatDeleteMsg(mid = '') {
+  const isConv = !mid;
+  const confirmText = isConv
+    ? `确定删除与 ${state.chatActiveTargetName} (${state.chatActiveTargetId}) 的整个会话吗？`
+    : `确定删除单条消息 MID: ${mid} 吗？`;
+  if (!confirm(confirmText)) return;
+
+  try {
+    const payload = {
+      mid: mid || '',
+      unfollow: state.chatUnfollowBox
+    };
+    if (state.chatActiveIsGroup) {
+      payload.gid = state.chatActiveTargetId;
+    } else {
+      payload.uid = state.chatActiveTargetId;
+    }
+    const res = await fetch('/api/chat/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    renderChatTrace(json);
+    if (res.ok && json.data?.ok) {
+      showToast(json.message || '删除成功', 'success');
+      if (isConv) {
+        fetchChatContacts();
+      }
+      fetchChatMessages();
+    } else {
+      showToast(json.message || '删除失败', 'error');
+    }
+  } catch (err) {
+    showToast(`删除异常: ${err.message}`, 'error');
+  }
+}
+
+async function handleChatMarkRead() {
+  if (!state.chatActiveTargetId) return;
+  try {
+    const payload = { unfollow: state.chatUnfollowBox };
+    if (state.chatActiveIsGroup) {
+      payload.gid = state.chatActiveTargetId;
+    } else {
+      payload.uid = state.chatActiveTargetId;
+    }
+    const res = await fetch('/api/chat/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    renderChatTrace(json);
+    if (res.ok && json.data?.ok) {
+      showToast(json.message || '已标记为已读', 'success');
+      fetchChatContacts();
+    } else {
+      showToast(json.message || '标记已读失败', 'error');
+    }
+  } catch (err) {
+    showToast(`操作失败: ${err.message}`, 'error');
+  }
+}
+
+function clearChatSelectedFile() {
+  state.chatSelectedFile = null;
+  const fileInput = document.getElementById('chat-file-input');
+  const badge = document.getElementById('chat-file-badge');
+  const clearBtn = document.getElementById('btn-chat-clear-file');
+  if (fileInput) fileInput.value = '';
+  if (badge) {
+    badge.style.display = 'none';
+    badge.textContent = '';
+  }
+  if (clearBtn) clearBtn.style.display = 'none';
+}
+
+function initChatCenter() {
+  initWebimRawConsole();
+  document.getElementById('btn-chat-check-auth')?.addEventListener('click', fetchChatStatus);
+  document.getElementById('btn-chat-refresh-contacts')?.addEventListener('click', fetchChatContacts);
+  document.getElementById('btn-chat-search')?.addEventListener('click', fetchChatContacts);
+  document.getElementById('chat-search-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') fetchChatContacts();
+  });
+
+  const normalBoxBtn = document.getElementById('btn-chat-box-normal');
+  const unfollowBoxBtn = document.getElementById('btn-chat-box-unfollow');
+  normalBoxBtn?.addEventListener('click', () => {
+    state.chatUnfollowBox = false;
+    normalBoxBtn.className = 'btn btn-primary btn-sm';
+    if (unfollowBoxBtn) unfollowBoxBtn.className = 'btn btn-secondary btn-sm';
+    fetchChatContacts();
+  });
+  unfollowBoxBtn?.addEventListener('click', () => {
+    state.chatUnfollowBox = true;
+    unfollowBoxBtn.className = 'btn btn-primary btn-sm';
+    if (normalBoxBtn) normalBoxBtn.className = 'btn btn-secondary btn-sm';
+    fetchChatContacts();
+  });
+
+  document.getElementById('btn-chat-open-target')?.addEventListener('click', () => {
+    const val = (document.getElementById('chat-manual-target')?.value || '').trim();
+    if (!val) {
+      showToast('请输入目标 UID 或群号 GID', 'error');
+      return;
+    }
+    selectChatTarget(val, val, val.length >= 15);
+  });
+
+  document.getElementById('btn-chat-mark-read')?.addEventListener('click', handleChatMarkRead);
+  document.getElementById('btn-chat-delete-conv')?.addEventListener('click', () => handleChatDeleteMsg(''));
+  document.getElementById('btn-chat-refresh-msgs')?.addEventListener('click', fetchChatMessages);
+
+  const fileInput = document.getElementById('chat-file-input');
+  const badge = document.getElementById('chat-file-badge');
+  const clearBtn = document.getElementById('btn-chat-clear-file');
+  document.getElementById('btn-chat-pick-file')?.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    state.chatSelectedFile = file;
+    if (badge) {
+      badge.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      badge.style.display = 'inline';
+    }
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+  });
+  clearBtn?.addEventListener('click', clearChatSelectedFile);
+
+  document.getElementById('btn-chat-dry-run')?.addEventListener('click', () => submitChatMessage(true));
+  document.getElementById('btn-chat-send')?.addEventListener('click', () => submitChatMessage(false));
+  document.getElementById('chat-input-text')?.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      submitChatMessage(false);
+    }
+  });
+}
+
 

@@ -37,6 +37,15 @@ Default Base URL: `http://127.0.0.1:15001` (can be configured via `WEIBO_API_BAS
 | `POST` | `/api/publish/visibility` | Change post visibility (`0/1/5/6/10`) | `{"mid": "...", "visible": 1}` |
 | `POST` | `/api/publish/delete` | Delete a Weibo post | `{"mid": "..."}` |
 | `GET` | `/api/publish/posts` | List own remote posts & local publish history | `source=remote\|local`, `page=1` |
+| `GET` | `/api/chat/status` | Check WebIM direct message auth status | None |
+| `GET` | `/api/chat/contacts` | List or search DM contacts & group chats | `count`, `cursor`, `unfollow`, `include_group`, `keyword` |
+| `GET` | `/api/chat/messages` | Fetch 1-on-1 or group chat message history | `uid`, `gid`, `count`, `max_id`, `unfollow` |
+| `POST` | `/api/chat/send` | Send text/image/file message to user or group | JSON `{uid, gid, text, file_path, dry_run}` or multipart `file` |
+| `POST` | `/api/chat/recall` | Recall a sent message (within 3 minutes) | `{"mid": "...", "gid": "..."}` |
+| `POST` | `/api/chat/delete` | Delete a message or entire conversation | `{"mid": "...", "uid": "...", "gid": "...", "unfollow": false}` |
+| `POST` | `/api/chat/read` | Mark conversation or unfollowed box as read | `{"uid": "...", "gid": "...", "unfollow": false}` |
+| `ANY` | `/webim/<path:subpath>` | 1:1 native pass-through to `https://api.weibo.com/webim/<subpath>` | Auto-injects `source=209678993`, `t=<ms>`, `Referer: https://api.weibo.com/chat`, Cookie |
+| `ANY` | `/ajax/<path:subpath>` | 1:1 native pass-through to `https://weibo.com/ajax/<subpath>` | Auto-injects Cookie, `X-XSRF-TOKEN`, `Referer: https://weibo.com/` |
 
 ---
 

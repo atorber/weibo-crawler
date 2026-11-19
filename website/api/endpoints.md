@@ -1,8 +1,14 @@
 # 接口端点与调用规范
 
-本文档详尽列出了 `service.py` 提供的标准化 RESTful API 接口端点、请求方式、入参规范与返回格式。
+本文档详尽列出了 `service.py` 提供的**双层架构** HTTP 接口端点、请求方式、入参规范与返回格式。
 
-默认服务运行在 `http://127.0.0.1:15001`（或由启动参数 `--port` 指定）。
+默认服务运行在 `http://127.0.0.1:15001`（或由启动参数 `--port` 指定）：
+
+- **🔌 层面一：Weibo 原生透传网关与客户端底座**
+  - 原生 1:1 透传网关：[第 8 节 · Weibo 原生接口透明透传](#_8-weibo-原生接口透明透传-native-pass-through-proxy)（``/ajax/<path:subpath>``、``/webim/<path:subpath>``、``/interface/*``、``m.weibo.cn/*``、``/api/passthrough/info``）
+  - 基于透传构建的官方客户端 API：[第 7 节 · 微博发布与博文管理 (`/api/publish/*`)](#_7-微博发布与博文管理) 与 [第 9 节 · 微博私信与群聊管理 (`/api/chat/*`)](#_9-微博私信与群聊管理接口-apichat)
+- **🕷️ 层面二：微博爬虫任务调度与存档数据查询**
+  - 爬虫任务调度、目标博主管理、配置中心、Cookie 认证、连通性测试与存档检索：见下方第 1 ~ 6 节及第 10 节兼容端点。
 
 ---
 
@@ -588,7 +594,16 @@ curl -X DELETE http://127.0.0.1:15001/api/users/1669879400
 | ``/detail/<weibo_id>`` | `https://m.weibo.cn/detail/<weibo_id>` | `GET` | 单条微博 H5 页面（不附加 `X-Requested-With`） |
 | ``/m/api/config`` 或 ``/api/config?passthrough=1`` | `https://m.weibo.cn/api/config` | `GET` | 移动版配置与登录态探测（无 `?passthrough=1` 与 `X-Weibo-Passthrough: 1` 时 `/api/config` 保持返回控制台配置） |
 
-### 8.4 控制请求头与调用示例
+### 8.4 微博私信与群聊 WebIM 原生透传 (``api.weibo.com/webim/*``)
+
+- **URL**: ``/webim/<path:subpath>`` -> 1:1 透传至 ``https://api.weibo.com/webim/<subpath>``
+- **Method**: `GET`、`POST`、`PUT`、`DELETE`、`PATCH`、`HEAD`、`OPTIONS`
+- **特性说明**:
+  - `GET` 请求自动补齐 `source=209678993` 与毫秒时间戳 `t`；
+  - `POST` 请求自动注入 `Referer: https://api.weibo.com/chat`、`Origin: https://api.weibo.com`，支持原生表单、`multipart/form-data`（如 ``/webim/uploadx.json``）或 JSON 请求体自动转表单并补齐 `&source=209678993`；
+  - 遇到 `error_code === 21301`（`sub invalid`）或 HTTP `401/403/432/500` 时自动从浏览器刷新 `.weibo.com` Cookie 并重试。
+
+### 8.5 控制请求头与调用示例
 
 - `X-Weibo-Cookie`：为单次请求临时指定自定义 Cookie（跳过项目配置与浏览器提取）。
 - `X-Weibo-Raw-Body: 1`：对 `/ajax/*` `POST` 请求禁用 JSON 自动转表单，原样转发原始请求体。
@@ -600,11 +615,28 @@ curl "http://127.0.0.1:15001/ajax/statuses/mymblog?uid=1669879400&page=1&feature
 curl -X POST "http://127.0.0.1:15001/ajax/statuses/update" -H "Content-Type: application/json" -d '{"content":"透传测试","visible":1}'
 curl "http://127.0.0.1:15001/api/container/getIndex?type=uid&value=1669879400"
 curl "http://127.0.0.1:15001/comments/hotflow?id=5367067832485479&mid=5367067832485479&max_id_type=0"
+curl "http://127.0.0.1:15001/webim/2/direct_messages/contacts.json?count=20"
 ```
 
 ---
 
-## 9. 兼容旧版端点 (Legacy API)
+## 9. 微博私信与群聊管理接口 (`/api/chat/*`)
+
+> 基于**方式一的 ``/webim/<path:subpath>`` 原生透传接口**构建的高层 RESTful API（对应 Web 控制台 `/chat` 页面），所有上游请求统一经由 `passthrough_proxy.proxy_webim` 转发，并在每个 JSON 响应的 `passthrough` 字段返回本次实际执行的 `/webim/*` 透传链路，同时自动识别单聊（`uid` < 15 位）与群聊（`gid` &ge; 15 位）。
+
+| 方法 | 路径 | 说明 | 核心参数 / 请求体 |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/chat/status` | 检查 WebIM 私信登录态与当前账号信息 | 无 |
+| `GET` | `/api/chat/contacts` | 获取或搜索私信联系人与群聊会话列表 | `count=50`, `cursor=0`, `unfollow=0\|1`, `include_group=1`, `keyword` |
+| `GET` | `/api/chat/messages` | 获取单聊 (`uid`) 或群聊 (`gid`) 历史消息 | `uid`, `gid`, `count=20`, `max_id=0`, `unfollow=0\|1` |
+| `POST` | `/api/chat/send` | 发送单聊或群聊文字/图片/文件附件 | JSON `{uid, gid, text, file_path, at_all, dry_run}` 或 `multipart/form-data` (`file`) |
+| `POST` | `/api/chat/recall` | 撤回 3 分钟内发送的单聊或群聊消息 | `{"mid": "...", "gid": "..."}` |
+| `POST` | `/api/chat/delete` | 删除单条私信/群消息或删除整个会话 | `{"mid": "...", "uid": "...", "gid": "...", "unfollow": false}` |
+| `POST` | `/api/chat/read` | 标记单聊、群聊或未关注人私信箱为已读 | `{"uid": "...", "gid": "...", "unfollow": false}` |
+
+---
+
+## 10. 兼容旧版端点 (Legacy API)
 
 - ``POST /refresh``: 兼容旧版触发接口，返回 `202 Accepted` 或 `409 Conflict`
 - ``GET /task/<task_id>``: 兼容旧版任务状态轮询

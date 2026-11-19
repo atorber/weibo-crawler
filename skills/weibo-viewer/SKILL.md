@@ -145,6 +145,41 @@ python skills/weibo-viewer/scripts/weibo_ctl.py publish delete --mid 53670678324
 
 ---
 
+### 8. Weibo Direct Messages & Group Chats (WebIM)
+Use when checking WebIM auth status, listing contacts or group chats, reading conversation history, sending text/image/file messages, recalling messages (within 3 minutes), deleting messages/conversations, marking conversations as read, or calling any native `/webim/*` endpoint via `raw` (all built on top of the Mode 1 `/webim/*` pass-through: HTTP `/webim/*` when service is online, or in-process `WeiboPassthroughProxy.proxy_webim` when offline).
+
+> **Safety Gate**: Always ask the user for explicit confirmation of the recipient (`--uid` / `--gid`) and message content before sending (`send`), recalling (`recall`), or deleting (`delete`) a message or conversation. Prefer `--dry-run` for validation.
+
+```bash
+# Check WebIM authentication status (add --verbose / -V to inspect /webim/* pass-through trace)
+python skills/weibo-viewer/scripts/weibo_ctl.py chat status -V
+
+# List contacts & group chats (or search by keyword / view unfollowed box)
+python skills/weibo-viewer/scripts/weibo_ctl.py chat contacts --limit 20
+python skills/weibo-viewer/scripts/weibo_ctl.py chat contacts --keyword "测试"
+python skills/weibo-viewer/scripts/weibo_ctl.py chat contacts --unfollow
+
+# Fetch 1-on-1 conversation messages or group chat messages
+python skills/weibo-viewer/scripts/weibo_ctl.py chat messages --uid 1669879400 --limit 20
+python skills/weibo-viewer/scripts/weibo_ctl.py chat messages --gid 4912345678901234 --limit 20
+
+# Dry-run or send a 1-on-1 / group chat message (with optional image/file attachment)
+python skills/weibo-viewer/scripts/weibo_ctl.py chat send --uid 1669879400 --text "你好" --dry-run
+python skills/weibo-viewer/scripts/weibo_ctl.py chat send --uid 1669879400 --text "发送附件" --file ./pic.jpg
+python skills/weibo-viewer/scripts/weibo_ctl.py chat send --gid 4912345678901234 --text "群消息测试"
+
+# Recall (within 3 min), delete message/conversation, or mark read
+python skills/weibo-viewer/scripts/weibo_ctl.py chat recall --mid 5367099999999999
+python skills/weibo-viewer/scripts/weibo_ctl.py chat delete --mid 5367099999999999 --uid 1669879400
+python skills/weibo-viewer/scripts/weibo_ctl.py chat read --uid 1669879400
+
+# Call any of the 101 native /webim/* endpoints directly through the pass-through
+python skills/weibo-viewer/scripts/weibo_ctl.py chat raw --path query_primary_info.json
+python skills/weibo-viewer/scripts/weibo_ctl.py chat raw --path 2/direct_messages/contacts.json --param count=10
+```
+
+---
+
 ## 📚 Advanced Architecture & Direct API / SQL Access
 
 For complex custom data analysis or automated scripting:

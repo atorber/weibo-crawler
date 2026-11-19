@@ -544,6 +544,273 @@ def cmd_publish(args):
             print(f"[{it.get('mid')}] ({vis_label}) {it.get('created_at', '')} | {snippet}")
 
 
+def _service_online():
+    res = http_request("/api/status", timeout=3)
+    return res.get("code") != -1
+
+
+def _build_chat_client(via="auto"):
+    """Build a WeiboChatClient that rides on the Mode 1 /webim/* pass-through.
+
+    - http : service online -> requests go to {WEIBO_API_BASE}/webim/<path>
+    - local: service offline -> in-process WeiboPassthroughProxy.proxy_webim
+    """
+    if WORKSPACE_ROOT not in sys.path:
+        sys.path.insert(0, WORKSPACE_ROOT)
+    from util.chat.weibo_chat import WeiboChatClient
+
+    mode = via
+    if via == "auto":
+        mode = "http" if _service_online() else "local"
+    if mode == "http":
+        return WeiboChatClient(project_root=WORKSPACE_ROOT, passthrough_base_url=DEFAULT_API_BASE)
+    return WeiboChatClient(project_root=WORKSPACE_ROOT)
+
+
+def _parse_kv_list(items):
+    out = {}
+    for item in items or []:
+        if "=" not in item:
+            print(f"❌ Invalid key=value pair: {item}")
+            sys.exit(1)
+        k, v = item.split("=", 1)
+        out[k.strip()] = v
+    return out
+
+
+def _print_chat_trace(client):
+    trace = getattr(client, "trace", None) or []
+    if not trace:
+        return
+    print(f"🔌 via {client.transport} pass-through:")
+    for t in trace:
+        print(f"   {t['method']} {t['path']} -> {t['status']}")
+
+
+def cmd_chat(args):
+    """Weibo Direct Messages & Group Chats, built on the /webim/* native pass-through."""
+    action = args.action
+    as_json = bool(getattr(args, "json", False))
+    client = _build_chat_client(getattr(args, "via", "auto"))
+
+    def _finish(d, ok_key="ok", text_lines=None):
+        ok = bool(d.get(ok_key))
+        if as_json:
+            out = dict(d)
+            out.pop("raw", None) if not getattr(args, "raw_json", False) else None
+            out["passthrough"] = client.trace
+            print(json.dumps(out, indent=2, ensure_ascii=False, default=str))
+        else:
+            if text_lines:
+                for line in text_lines:
+                    print(line)
+            else:
+                print(f"{'✅' if ok else '❌'} {d.get('message') or d.get('msg') or ''}")
+            if args.verbose:
+                _print_chat_trace(client)
+        if not ok:
+            sys.exit(1)
+
+    if action == "status":
+        d = client.check_auth()
+        lines = (
+            [f"✅ WebIM 已登录: {d.get('screen_name') or d.get('uid')} (UID: {d.get('uid')})"]
+            if d.get("authenticated")
+            else [f"❌ WebIM 未登录或失效: {d.get('message')}"]
+        )
+        _finish(d, ok_key="authenticated", text_lines=lines)
+        return
+
+    if action == "contacts":
+        if args.keyword:
+            d = client.search_contacts(keyword=args.keyword, count=args.limit)
+        else:
+            d = client.list_contacts(count=args.limit, cursor=args.max_id or 0, unfollow=bool(args.unfollow))
+        lines = None
+        if d.get("ok"):
+            contacts = d.get("contacts") or []
+            lines = ["No contacts found."] if not contacts else []
+            for c in contacts:
+                tag = "Group" if c.get("is_group") else "User"
+                unread = f" [未读:{c.get('unread_count')}]" if c.get("unread_count") else ""
+                snippet = (c.get("last_text") or "").replace("\n", " ")[:60]
+                lines.append(f"[{tag} {c.get('id')}] {c.get('name')}{unread} | {snippet}")
+        _finish(d, text_lines=lines)
+        return
+
+    if action == "messages":
+        if not args.uid and not args.gid:
+            print("❌ Either --uid or --gid is required for 'messages'")
+            sys.exit(1)
+        target_gid = args.gid or (args.uid if len(str(args.uid).strip()) >= 15 else "")
+        if target_gid:
+            d = client.get_group_messages(gid=target_gid, count=args.limit, max_mid=args.max_id or 0)
+        else:
+            d = client.get_conversation(
+                uid=args.uid, count=args.limit, max_id=args.max_id or 0, unfollow=bool(args.unfollow)
+            )
+        lines = None
+        if d.get("ok"):
+            msgs = d.get("messages") or []
+            lines = ["No messages found."] if not msgs else []
+            for m in msgs:
+                text = (m.get("text") or "").replace("\n", " ")
+                lines.append(f"[{m.get('mid')}] {m.get('created_at', '')} {m.get('sender_name') or m.get('sender_uid')}: {text}")
+        _finish(d, text_lines=lines)
+        return
+
+    if action == "send":
+        if not args.uid and not args.gid:
+            print("❌ Either --uid or --gid is required for 'send'")
+            sys.exit(1)
+        d = client.send_message(
+            uid=args.uid or "",
+            gid=args.gid or "",
+            text=args.text or "",
+            file_path=os.path.abspath(args.file) if args.file else None,
+            dry_run=bool(args.dry_run),
+        )
+        ok = bool(d.get("ok"))
+        lines = [f"{'✅' if ok else '❌'} {d.get('message') or d.get('msg')} (MID: {d.get('mid') or 'N/A'})"]
+        _finish(d, text_lines=lines)
+        return
+
+    if action == "recall":
+        if not args.mid:
+            print("❌ --mid is required for 'recall'")
+            sys.exit(1)
+        _finish(client.recall_message(mid=args.mid, gid=args.gid or ""))
+        return
+
+    if action == "delete":
+        if not args.mid and not args.uid and not args.gid:
+            print("❌ Provide --mid (single message) or --uid/--gid (conversation) for 'delete'")
+            sys.exit(1)
+        _finish(client.delete_message(mid=args.mid or "", uid=args.uid or "", gid=args.gid or "", unfollow=bool(args.unfollow)))
+        return
+
+    if action == "read":
+        if not args.uid and not args.gid and not args.unfollow:
+            print("❌ Provide --uid, --gid, or --unfollow for 'read'")
+            sys.exit(1)
+        _finish(client.mark_read(uid=args.uid or "", gid=args.gid or "", unfollow=bool(args.unfollow)))
+        return
+
+    if action == "raw":
+        if not args.path:
+            print("❌ --path is required for 'raw' (e.g. 2/direct_messages/contacts.json)")
+            sys.exit(1)
+        params = _parse_kv_list(args.param)
+        form = _parse_kv_list(args.data)
+        method = (args.method or ("POST" if form else "GET")).upper()
+        d = client.raw_request(method, args.path, params=params or None, form_data=form if method != "GET" else None)
+        if as_json or True:
+            print(json.dumps(d if as_json else d.get("data"), indent=2, ensure_ascii=False, default=str))
+            if not as_json:
+                print(f"\n🔌 {method} {d.get('path')} -> HTTP {d.get('status')} ({client.transport}) {d.get('upstream') or ''}")
+        if not d.get("ok"):
+            sys.exit(1)
+        return
+
+
+def cmd_passthrough(args):
+    """Layer-1 Weibo Native Pass-Through Gateway CLI (`info` or `request`)."""
+    if WORKSPACE_ROOT not in sys.path:
+        sys.path.insert(0, WORKSPACE_ROOT)
+    from util.passthrough import WeiboPassthroughProxy
+
+    action = args.action
+    as_json = bool(getattr(args, "json", False))
+
+    if action == "info":
+        res = http_request("/api/passthrough/info", timeout=5)
+        if res.get("code") == -1:
+            proxy = WeiboPassthroughProxy(project_root=WORKSPACE_ROOT)
+            info = {
+                "cookie_configured": bool(getattr(proxy, "_cookie_str", "")),
+                "has_xsrf_token": bool(proxy._latest_xsrf_token()),
+                "auto_refresh_enabled": bool(proxy.auto_refresh),
+                "transport": "local (service offline)",
+                "upstreams": [
+                    "/ajax/<subpath> -> https://weibo.com/ajax/<subpath>",
+                    "/webim/<subpath> -> https://api.weibo.com/webim/<subpath>",
+                    "/interface/upload.php -> https://picupload.weibo.com/interface/upload.php",
+                    "/api/container/getIndex | /comments/hotflow | ... -> https://m.weibo.cn/*",
+                ],
+            }
+        else:
+            info = res.get("data", res)
+        if as_json:
+            print(json.dumps(info, indent=2, ensure_ascii=False))
+            return
+        print("🔌 Weibo Native Pass-Through Gateway (Layer 1)")
+        print(f"   Cookie Ready : {'Yes' if info.get('cookie_configured') else 'No'}")
+        print(f"   XSRF-TOKEN   : {'Yes' if info.get('has_xsrf_token') else 'No'}")
+        print("   Upstreams    :")
+        for u in info.get("upstreams", []):
+            if isinstance(u, dict):
+                print(f"     • {u.get('local_route')} -> {u.get('upstream_base')}")
+            else:
+                print(f"     • {u}")
+        return
+
+    raw_path = (args.path or "").strip()
+    if not raw_path:
+        print("❌ --path is required for 'passthrough request' (e.g. /ajax/statuses/config or /webim/query_primary_info.json)")
+        sys.exit(1)
+
+    norm = raw_path.lstrip("/")
+    params = _parse_kv_list(args.param)
+    form = _parse_kv_list(args.data)
+    method = (args.method or ("POST" if form else "GET")).upper()
+
+    proxy = WeiboPassthroughProxy(project_root=WORKSPACE_ROOT)
+    if norm.startswith("ajax/"):
+        status, headers, content = proxy.proxy_weibo_ajax(
+            norm[len("ajax/"):],
+            method=method,
+            query_params=params or None,
+            form_data=form if method != "GET" else None,
+        )
+    elif norm.startswith("webim/"):
+        status, headers, content = proxy.proxy_webim(
+            norm[len("webim/"):],
+            method=method,
+            query_params=params or None,
+            form_data=form if method != "GET" else None,
+        )
+    elif norm.startswith("interface/"):
+        ep = norm[len("interface/"):]
+        body_bytes = None
+        if args.file:
+            with open(os.path.abspath(args.file), "rb") as f:
+                body_bytes = f.read()
+        status, headers, content = proxy.proxy_picupload(
+            ep, query_params=params or None, body=body_bytes
+        )
+    else:
+        mobile_path = "api/config" if norm == "m/api/config" else norm
+        status, headers, content = proxy.proxy_mobile_weibo(
+            mobile_path, method=method, query_params=params or None
+        )
+
+    try:
+        parsed_body = json.loads((content or b"").decode("utf-8"))
+    except Exception:
+        parsed_body = (content or b"").decode("utf-8", errors="replace")
+
+    out = {
+        "status": status,
+        "upstream": (headers or {}).get("X-Weibo-Passthrough-Upstream", ""),
+        "data": parsed_body,
+    }
+    print(json.dumps(out if as_json else parsed_body, indent=2, ensure_ascii=False, default=str))
+    if not as_json:
+        print(f"\n🔌 {method} /{norm} -> HTTP {status} ({out['upstream']})")
+    if status >= 400:
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Weibo Crawler & Data Viewer CLI Helper",
@@ -608,6 +875,37 @@ def main():
     p_pub.add_argument("--page", type=int, default=1, help="Timeline page number (for list)")
     p_pub.add_argument("--json", action="store_true", help="Output raw JSON")
 
+    # Direct Message & Group Chat Management
+    p_chat = subparsers.add_parser("chat", help="Weibo Direct Messages & Group Chats (built on /webim/* pass-through)")
+    p_chat.add_argument("action", choices=["status", "contacts", "messages", "send", "recall", "delete", "read", "raw"], default="status", nargs="?")
+    p_chat.add_argument("--uid", type=str, help="Target 1-on-1 user UID")
+    p_chat.add_argument("--gid", type=str, help="Target group chat GID (>=15 digits)")
+    p_chat.add_argument("--text", "-t", type=str, help="Message text content")
+    p_chat.add_argument("--file", "-f", type=str, help="Local image or attachment path to send")
+    p_chat.add_argument("--mid", type=str, help="Target message ID (for recall or delete)")
+    p_chat.add_argument("--keyword", "-k", type=str, help="Search keyword for contacts/groups")
+    p_chat.add_argument("--unfollow", action="store_true", help="Target unfollowed message box (public)")
+    p_chat.add_argument("--limit", "-l", type=int, default=20, help="Number of contacts or messages to fetch")
+    p_chat.add_argument("--max-id", type=int, default=0, help="Pagination cursor (max_id / max_mid / cursor)")
+    p_chat.add_argument("--dry-run", action="store_true", help="Validate chat message parameters without sending")
+    p_chat.add_argument("--via", choices=["auto", "http", "local"], default="auto", help="Pass-through transport: http=service /webim/*, local=in-process proxy_webim")
+    p_chat.add_argument("--method", type=str, help="HTTP method for 'raw' (default GET, or POST when --data given)")
+    p_chat.add_argument("--path", type=str, help="Native WebIM path for 'raw', e.g. 2/direct_messages/contacts.json")
+    p_chat.add_argument("--param", action="append", help="Query param key=value for 'raw' (repeatable)")
+    p_chat.add_argument("--data", action="append", help="Form field key=value for 'raw' POST (repeatable)")
+    p_chat.add_argument("--verbose", "-V", action="store_true", help="Print the /webim/* pass-through call trace")
+    p_chat.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # Layer 1 Native Pass-Through Gateway CLI
+    p_pt = subparsers.add_parser("passthrough", help="Layer-1 Weibo Native Pass-Through Gateway (info or raw request across /ajax/*, /webim/*, /interface/*, m.weibo.cn)")
+    p_pt.add_argument("action", choices=["info", "request"], default="info", nargs="?")
+    p_pt.add_argument("--method", type=str, help="HTTP method (default GET, or POST when --data given)")
+    p_pt.add_argument("--path", type=str, help="Pass-through path, e.g. /ajax/statuses/config, /webim/query_primary_info.json, /api/container/getIndex")
+    p_pt.add_argument("--param", action="append", help="Query param key=value (repeatable)")
+    p_pt.add_argument("--data", action="append", help="Form field key=value for POST (repeatable)")
+    p_pt.add_argument("--file", "-f", type=str, help="Local binary file for /interface/upload.php")
+    p_pt.add_argument("--json", action="store_true", help="Output raw JSON envelope")
+
     args = parser.parse_args()
     if not args.subcommand:
         parser.print_help()
@@ -623,6 +921,8 @@ def main():
         "logs": cmd_logs,
         "cookie": cmd_cookie,
         "publish": cmd_publish,
+        "chat": cmd_chat,
+        "passthrough": cmd_passthrough,
     }
     dispatch[args.subcommand](args)
 

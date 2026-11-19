@@ -38,15 +38,23 @@ from requests.exceptions import RequestException
 
 from util.browser_cookie import extract_and_save_cookie, get_cookie_auto_config
 from util.config import config_paths
+from util.passthrough.weibo_proxy import (
+    ALLOWED_IMAGE_DOMAIN_SUFFIXES,
+    DEFAULT_CLIENT_VERSION,
+    DEFAULT_SERVER_VERSION,
+    DEFAULT_USER_AGENT,
+    MIME_BY_EXT,
+    PLACEHOLDER_COOKIES,
+    WeiboPassthroughProxy,
+    _default_project_root,
+    _guess_mime,
+    _parse_config_text,
+    is_allowed_weibo_image_url,
+    normalize_weibo_image_url,
+    resolve_active_cookie,
+)
 
 logger = logging.getLogger("weibo.publish")
-
-DEFAULT_CLIENT_VERSION = "v1.1.260"
-DEFAULT_SERVER_VERSION = "v2026.11.18.1"
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
-)
 
 VISIBLE_OPTIONS: dict[int, str] = {
     0: "公开",
@@ -58,16 +66,7 @@ VISIBLE_OPTIONS: dict[int, str] = {
 
 MAX_IMAGES = 18
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
-PLACEHOLDER_COOKIES = {"", "your cookie", "YOUR_WEIBO_COOKIE_HERE"}
-ALLOWED_IMAGE_DOMAIN_SUFFIXES = (".sinaimg.cn", ".weibocdn.com")
-
-MIME_BY_EXT: dict[str, str] = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-}
+MAX_TRACE_ITEMS = 50
 
 UPLOAD_ERROR_MESSAGES: dict[int, str] = {
     1: "用户未登录",
@@ -98,75 +97,6 @@ UPLOAD_ERROR_MESSAGES: dict[int, str] = {
     -11: "存储错误",
     -12: "图片 EXIF 信息超长(2k)",
 }
-
-
-def _default_project_root() -> str:
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
-
-def _parse_config_text(raw: str) -> dict:
-    if not raw.strip():
-        return {}
-    if json5 is not None:
-        try:
-            data = json5.loads(raw)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            pass
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        pass
-    m = re.search(r'"cookie"\s*:\s*"([^"]*)"', raw)
-    return {"cookie": m.group(1)} if m else {}
-
-
-def resolve_active_cookie(project_root: str | None = None) -> tuple[str, str | None]:
-    """Resolve current Weibo Cookie string and optional backing .txt file path.
-
-    Priority:
-        1. ``WEIBO_COOKIE`` environment variable
-        2. ``cookie`` field in ``config/config.json`` (or root ``config.json`` fallback)
-    """
-    env_cookie = (os.environ.get("WEIBO_COOKIE") or "").strip()
-    if env_cookie and env_cookie not in PLACEHOLDER_COOKIES:
-        return env_cookie, None
-
-    root = os.path.abspath(project_root or _default_project_root())
-    config_path, example_path = config_paths.config_files(root)
-    target_path = config_path if os.path.isfile(config_path) else example_path
-    if not os.path.isfile(target_path):
-        return "", None
-
-    try:
-        with open(target_path, "r", encoding="utf-8") as f:
-            raw = f.read()
-    except OSError:
-        return "", None
-
-    parsed = _parse_config_text(raw)
-    cookie_val = parsed.get("cookie", "")
-    if not isinstance(cookie_val, str):
-        return "", None
-
-    cookie_val = cookie_val.strip()
-    if cookie_val.endswith(".txt"):
-        resolved_txt = config_paths.resolve_config_file(root, cookie_val)
-        if os.path.isfile(resolved_txt):
-            try:
-                with open(resolved_txt, "r", encoding="utf-8") as f:
-                    text = f.read().strip()
-                if text in PLACEHOLDER_COOKIES:
-                    text = ""
-                return text, resolved_txt
-            except OSError:
-                return "", resolved_txt
-        return "", resolved_txt
-
-    if cookie_val in PLACEHOLDER_COOKIES:
-        return "", None
-    return cookie_val, None
 
 
 def parse_schedule_timestamp(schedule_time, now_ms: int | None = None) -> int:
@@ -217,45 +147,11 @@ def _clean_form(data: dict) -> dict:
     return {k: v for k, v in data.items() if v is not None and v != ""}
 
 
-def normalize_weibo_image_url(url: str) -> str:
-    """Normalize protocol-relative or whitespace-padded Weibo image URLs."""
-    text = str(url or "").strip()
-    if not text:
-        return ""
-    if text.startswith("//"):
-        return "https:" + text
-    return text
-
-
-def is_allowed_weibo_image_url(url: str) -> bool:
-    """Allow only official Weibo image/media CDN hosts to prevent SSRF."""
-    normalized = normalize_weibo_image_url(url)
-    if not normalized:
-        return False
-    parsed = urlparse(normalized)
-    if parsed.scheme not in ("http", "https"):
-        return False
-    if parsed.username is not None or parsed.password is not None:
-        return False
-    host = (parsed.hostname or "").rstrip(".").lower()
-    if not host:
-        return False
-    return any(host.endswith(suffix) for suffix in ALLOWED_IMAGE_DOMAIN_SUFFIXES)
-
-
-def _guess_mime(filename: str | None) -> str:
-    if filename:
-        ext = os.path.splitext(filename)[1].lower()
-        if ext in MIME_BY_EXT:
-            return MIME_BY_EXT[ext]
-        guessed, _ = mimetypes.guess_type(filename)
-        if guessed and guessed.startswith("image/"):
-            return guessed
-    return "image/jpeg"
-
-
 class WeiboPublisher:
-    """Client for Weibo PC web post creation, image upload, edit, visibility and deletion."""
+    """Client for Weibo PC web post creation, image upload, edit, visibility and deletion.
+
+    Built on top of the Layer-1 Weibo native pass-through gateway (`/ajax/*` and `/interface/*`).
+    """
 
     def __init__(
         self,
@@ -264,11 +160,16 @@ class WeiboPublisher:
         session: requests.Session | None = None,
         auto_refresh: bool = True,
         timeout: int = 15,
+        proxy: WeiboPassthroughProxy | None = None,
+        passthrough_base_url: str | None = None,
     ):
         self.project_root = os.path.abspath(project_root or _default_project_root())
         self.timeout = timeout
         self.auto_refresh = auto_refresh
         self.cookie_file_path: str | None = None
+        self.passthrough_base_url = (
+            str(passthrough_base_url).rstrip("/") if passthrough_base_url else ""
+        )
 
         if cookie is None:
             resolved_cookie, resolved_file = resolve_active_cookie(self.project_root)
@@ -278,18 +179,32 @@ class WeiboPublisher:
             self.cookie_str = str(cookie).strip()
 
         self.session = session or requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": DEFAULT_USER_AGENT,
-                "Accept": "application/json, text/plain, */*",
-                "Referer": "https://weibo.com/",
-                "Origin": "https://weibo.com",
-                "X-Requested-With": "XMLHttpRequest",
-                "client-version": DEFAULT_CLIENT_VERSION,
-                "server-version": DEFAULT_SERVER_VERSION,
-            }
-        )
+        if hasattr(self.session, "headers") and isinstance(self.session.headers, dict):
+            self.session.headers.update(
+                {
+                    "User-Agent": DEFAULT_USER_AGENT,
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": "https://weibo.com/",
+                    "Origin": "https://weibo.com",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "client-version": DEFAULT_CLIENT_VERSION,
+                    "server-version": DEFAULT_SERVER_VERSION,
+                }
+            )
 
+        if self.passthrough_base_url:
+            self.transport = "http"
+            self.proxy = None
+        else:
+            self.transport = "in-process"
+            self.proxy = proxy or WeiboPassthroughProxy(
+                project_root=self.project_root,
+                session=self.session,
+                auto_refresh=auto_refresh,
+                timeout=max(int(timeout), 15),
+            )
+
+        self.trace: list[dict] = []
         self._parsed_cookies: dict[str, str] = {}
         if self.cookie_str:
             self._apply_cookie_string(self.cookie_str)
@@ -297,6 +212,20 @@ class WeiboPublisher:
         self._uid: str = ""
         self._screen_name: str = ""
         self._session_ready: bool = False
+
+    def _record_trace(self, method: str, path: str, status: int, upstream: str = "") -> None:
+        norm_path = path if path.startswith("/") else f"/{path}"
+        self.trace.append(
+            {
+                "method": str(method).upper(),
+                "path": norm_path,
+                "status": int(status or 0),
+                "upstream": upstream or f"https://weibo.com{norm_path}",
+                "transport": self.transport,
+            }
+        )
+        if len(self.trace) > MAX_TRACE_ITEMS:
+            self.trace = self.trace[-MAX_TRACE_ITEMS:]
 
     def _apply_cookie_string(self, cookie_str: str) -> None:
         self._parsed_cookies = {}
@@ -405,6 +334,7 @@ class WeiboPublisher:
                     "https://weibo.com/ajax/profile/detail",
                     timeout=self.timeout,
                 )
+                self._record_trace("GET", "/ajax/profile/detail", getattr(r_prof, "status_code", 200))
             except RequestException as exc:
                 return {"_network_error": str(exc)}, 0
 
@@ -491,6 +421,7 @@ class WeiboPublisher:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=self.timeout,
             )
+            self._record_trace("POST", path, getattr(resp, "status_code", 200), url)
         except RequestException as exc:
             return {"ok": False, "msg": f"请求 {path} 失败: {exc}"}
 
@@ -592,6 +523,7 @@ class WeiboPublisher:
                 headers=headers,
                 timeout=max(self.timeout, 60),
             )
+            self._record_trace("POST", "/interface/upload.php", getattr(resp, "status_code", 200), url)
             js = resp.json()
         except RequestException as exc:
             return None, f"图床请求异常 ({host}): {exc}", True
@@ -629,6 +561,7 @@ class WeiboPublisher:
                 headers=headers,
                 timeout=max(self.timeout, 60),
             )
+            self._record_trace("POST", "/interface/pic_upload.php", getattr(resp, "status_code", 200), url)
             js = resp.json()
         except (RequestException, ValueError) as exc:
             return None, f"备用图床上传失败: {exc}"
@@ -866,6 +799,7 @@ class WeiboPublisher:
                 params={"mid": mid_str},
                 timeout=self.timeout,
             )
+            self._record_trace("GET", "/ajax/statuses/checkCanEdit", getattr(resp, "status_code", 200))
             js = resp.json()
         except (RequestException, ValueError) as exc:
             return {"ok": False, "can_edit": False, "mid": mid_str, "msg": f"校验可编辑状态失败: {exc}"}
@@ -1070,6 +1004,7 @@ class WeiboPublisher:
                 params={"uid": self._uid, "page": int(page), "feature": int(feature)},
                 timeout=self.timeout,
             )
+            self._record_trace("GET", "/ajax/statuses/mymblog", getattr(resp, "status_code", 200))
             js = resp.json()
         except (RequestException, ValueError) as exc:
             return {"ok": False, "items": [], "msg": f"获取个人微博列表失败: {exc}"}

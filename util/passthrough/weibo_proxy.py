@@ -13,29 +13,150 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import re
 import threading
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 import zlib
+
+try:
+    import json5
+except ImportError:
+    json5 = None
 
 import requests
 from requests.exceptions import RequestException
 
 from util.browser_cookie import extract_and_save_cookie, get_cookie_auto_config
-from util.publish.weibo_publisher import (
-    DEFAULT_CLIENT_VERSION,
-    DEFAULT_SERVER_VERSION,
-    DEFAULT_USER_AGENT,
-    PLACEHOLDER_COOKIES,
-    _default_project_root,
-    resolve_active_cookie,
-)
+from util.config import config_paths
 
 logger = logging.getLogger("weibo.passthrough")
 
+DEFAULT_CLIENT_VERSION = "v1.1.260"
+DEFAULT_SERVER_VERSION = "v2026.11.18.1"
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+)
+DEFAULT_WEBIM_SOURCE = "209678993"
+PLACEHOLDER_COOKIES = {"", "your cookie", "YOUR_WEIBO_COOKIE_HERE"}
+ALLOWED_IMAGE_DOMAIN_SUFFIXES = (".sinaimg.cn", ".weibocdn.com")
+MIME_BY_EXT: dict[str, str] = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
 WEIBO_AUTH_COOKIE_KEYS = {"SUB", "SUBP", "XSRF-TOKEN", "SCF", "SSOLoginState"}
+
+
+def _default_project_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+
+def _parse_config_text(raw: str) -> dict:
+    if not raw.strip():
+        return {}
+    if json5 is not None:
+        try:
+            data = json5.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    m = re.search(r'"cookie"\s*:\s*"([^"]*)"', raw)
+    return {"cookie": m.group(1)} if m else {}
+
+
+def resolve_active_cookie(project_root: str | None = None) -> tuple[str, str | None]:
+    """Resolve current Weibo Cookie string and optional backing .txt file path.
+
+    Priority:
+        1. ``WEIBO_COOKIE`` environment variable
+        2. ``cookie`` field in ``config/config.json`` (or root ``config.json`` fallback)
+    """
+    env_cookie = (os.environ.get("WEIBO_COOKIE") or "").strip()
+    if env_cookie and env_cookie not in PLACEHOLDER_COOKIES:
+        return env_cookie, None
+
+    root = os.path.abspath(project_root or _default_project_root())
+    config_path, example_path = config_paths.config_files(root)
+    target_path = config_path if os.path.isfile(config_path) else example_path
+    if not os.path.isfile(target_path):
+        return "", None
+
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except OSError:
+        return "", None
+
+    parsed = _parse_config_text(raw)
+    cookie_val = parsed.get("cookie", "")
+    if not isinstance(cookie_val, str):
+        return "", None
+
+    cookie_val = cookie_val.strip()
+    if cookie_val.endswith(".txt"):
+        resolved_txt = config_paths.resolve_config_file(root, cookie_val)
+        if os.path.isfile(resolved_txt):
+            try:
+                with open(resolved_txt, "r", encoding="utf-8") as f:
+                    text = f.read().strip()
+                if text in PLACEHOLDER_COOKIES:
+                    text = ""
+                return text, resolved_txt
+            except OSError:
+                return "", resolved_txt
+        return "", resolved_txt
+
+    if cookie_val in PLACEHOLDER_COOKIES:
+        return "", None
+    return cookie_val, None
+
+
+def normalize_weibo_image_url(url: str) -> str:
+    """Normalize protocol-relative or whitespace-padded Weibo image URLs."""
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return "https:" + text
+    return text
+
+
+def is_allowed_weibo_image_url(url: str) -> bool:
+    """Allow only official Weibo image/media CDN hosts to prevent SSRF."""
+    normalized = normalize_weibo_image_url(url)
+    if not normalized:
+        return False
+    parsed = urlparse(normalized)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        return False
+    return any(host.endswith(suffix) for suffix in ALLOWED_IMAGE_DOMAIN_SUFFIXES)
+
+
+def _guess_mime(filename: str | None) -> str:
+    if filename:
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in MIME_BY_EXT:
+            return MIME_BY_EXT[ext]
+        guessed, _ = mimetypes.guess_type(filename)
+        if guessed and guessed.startswith("image/"):
+            return guessed
+    return "image/jpeg"
 
 ALLOWED_MOBILE_EXACT_PATHS = {
     "api/container/getIndex",
@@ -856,6 +977,152 @@ class WeiboPassthroughProxy:
             except RequestException as exc:
                 return _json_error_response(
                     502, f"重试 m.weibo.cn 上游失败: {exc}", upstream_url=target_url
+                )
+
+        return _resp_bytes_and_headers(resp, target_url)
+
+    def proxy_webim(
+        self,
+        subpath: str,
+        method: str = "GET",
+        query_params=None,
+        headers: dict | None = None,
+        body: bytes | str | None = None,
+        json_body=None,
+        form_data: dict | None = None,
+        files=None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Forward native requests under ``https://api.weibo.com/webim/<subpath>``."""
+        raw_subpath = str(subpath or "")
+        if not is_safe_subpath(raw_subpath):
+            return _json_error_response(400, f"非法微博私信 WebIM 路径: {subpath!r}")
+
+        target_url = f"https://api.weibo.com/webim/{raw_subpath}"
+        method_u = str(method or "GET").upper()
+        is_uploadx = raw_subpath.rstrip("/").endswith("uploadx.json")
+
+        caller_cookie = _extract_caller_cookie(headers)
+        if not caller_cookie:
+            self._reload_project_cookie_if_needed()
+
+        params_list = _normalize_query_params(query_params)
+        existing_qkeys = {k for k, _ in params_list}
+        if method_u == "GET" or is_uploadx:
+            if "source" not in existing_qkeys:
+                params_list.append(("source", DEFAULT_WEBIM_SOURCE))
+                existing_qkeys.add("source")
+            if method_u == "GET" and "t" not in existing_qkeys:
+                params_list.append(("t", str(int(time.time() * 1000))))
+                existing_qkeys.add("t")
+
+        def _build_webim_kwargs() -> dict:
+            req_headers = {
+                "User-Agent": _get_header_ci(headers, "User-Agent") or DEFAULT_USER_AGENT,
+                "Accept": _get_header_ci(headers, "Accept")
+                or "application/json, text/plain, */*",
+                "Referer": "https://api.weibo.com/chat",
+                "Origin": "https://api.weibo.com",
+            }
+            req_kw: dict = {
+                "params": params_list or None,
+                "headers": req_headers,
+                "timeout": max(self.timeout, 60) if is_uploadx else self.timeout,
+                "allow_redirects": False,
+            }
+
+            if method_u in ("POST", "PUT", "PATCH", "DELETE"):
+                raw_mode = _get_header_ci(headers, "X-Weibo-Raw-Body").strip().lower() in (
+                    "1",
+                    "true",
+                )
+                if files:
+                    multipart_files = {}
+                    for field_key, f_val in files.items():
+                        fname, fbytes, fmime = _read_uploaded_file_bytes(f_val)
+                        multipart_files[field_key] = (fname, fbytes, fmime)
+                    req_kw["files"] = multipart_files
+                    mp_data = dict(form_data or {})
+                    if "source" not in mp_data:
+                        mp_data["source"] = DEFAULT_WEBIM_SOURCE
+                    req_kw["data"] = mp_data
+                elif isinstance(json_body, dict) and not raw_mode:
+                    cleaned = clean_weibo_params(json_body)
+                    if not is_uploadx and "source" not in cleaned:
+                        cleaned["source"] = DEFAULT_WEBIM_SOURCE
+                    req_headers["Content-Type"] = (
+                        "application/x-www-form-urlencoded; charset=UTF-8"
+                    )
+                    req_kw["data"] = urlencode(cleaned, doseq=True)
+                elif body not in (None, b"", ""):
+                    ct = (
+                        _get_header_ci(headers, "Content-Type")
+                        or "application/x-www-form-urlencoded; charset=UTF-8"
+                    )
+                    req_headers["Content-Type"] = ct
+                    out_body = body
+                    if (
+                        not is_uploadx
+                        and not raw_mode
+                        and "application/x-www-form-urlencoded" in ct.lower()
+                    ):
+                        if isinstance(out_body, bytes):
+                            if b"source=" not in out_body and "source" not in existing_qkeys:
+                                suffix = f"&source={DEFAULT_WEBIM_SOURCE}".encode("utf-8")
+                                out_body = out_body + suffix
+                        else:
+                            text_b = str(out_body)
+                            if "source=" not in text_b and "source" not in existing_qkeys:
+                                out_body = f"{text_b}&source={DEFAULT_WEBIM_SOURCE}"
+                    req_kw["data"] = out_body
+                elif form_data:
+                    form_copy = dict(form_data)
+                    if not is_uploadx and "source" not in form_copy:
+                        form_copy["source"] = DEFAULT_WEBIM_SOURCE
+                    req_headers["Content-Type"] = (
+                        "application/x-www-form-urlencoded; charset=UTF-8"
+                    )
+                    req_kw["data"] = urlencode(form_copy, doseq=True)
+                elif not is_uploadx:
+                    req_headers["Content-Type"] = (
+                        "application/x-www-form-urlencoded; charset=UTF-8"
+                    )
+                    req_kw["data"] = f"source={DEFAULT_WEBIM_SOURCE}"
+
+            return req_kw
+
+        try:
+            resp = self._session_request(
+                method_u,
+                target_url,
+                caller_cookie=caller_cookie,
+                **_build_webim_kwargs(),
+            )
+        except RequestException as exc:
+            return _json_error_response(
+                502, f"请求 WebIM 上游失败: {exc}", upstream_url=target_url
+            )
+
+        js = _response_json_safe(resp) or {}
+        if (
+            (
+                resp.status_code in (401, 403, 432, 500)
+                or js.get("error_code") == 21301
+                or js.get("ok") == -100
+            )
+            and not caller_cookie
+            and self.auto_refresh
+            and self._try_browser_refresh(prefer_domain="weibo.com")
+        ):
+            try:
+                resp = self._session_request(
+                    method_u,
+                    target_url,
+                    caller_cookie=caller_cookie,
+                    **_build_webim_kwargs(),
+                )
+            except RequestException as exc:
+                return _json_error_response(
+                    502, f"重试 WebIM 上游失败: {exc}", upstream_url=target_url
                 )
 
         return _resp_bytes_and_headers(resp, target_url)
