@@ -21,6 +21,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib
+import importlib.util
 import os
 import shutil
 import sys
@@ -33,6 +36,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 _LOG_DIR: str | None = None
+_STDLIB_HTTP = None
 
 
 def default_stub_classes():
@@ -207,6 +211,72 @@ def bootstrap(session_class=None) -> None:
     """测试文件统一入口：隔离日志 + 安装 stub（幂等）。"""
     isolate_logs()
     install_import_stubs(session_class=session_class)
+
+
+@contextlib.contextmanager
+def stdlib_http_context():
+    """在 ``tests/http`` 遮蔽标准库 ``http`` 时，临时切换到标准库 ``http``。"""
+    global _STDLIB_HTTP
+    tests_dir = os.path.abspath(os.path.dirname(__file__))
+    saved_path = list(sys.path)
+    saved_http = sys.modules.get("http")
+    try:
+        sys.path[:] = [
+            p for p in sys.path if os.path.abspath(p or ".") != tests_dir
+        ]
+        saved_file = (
+            os.path.abspath(getattr(saved_http, "__file__", "") or "")
+            if saved_http is not None
+            else ""
+        )
+        saved_paths = [
+            os.path.abspath(str(p))
+            for p in (getattr(saved_http, "__path__", []) or [])
+        ]
+        is_tests_http = saved_http is not None and (
+            tests_dir in saved_file or any(tests_dir in p for p in saved_paths)
+        )
+        if _STDLIB_HTTP is not None:
+            sys.modules["http"] = _STDLIB_HTTP
+        elif is_tests_http or saved_http is None:
+            if is_tests_http:
+                sys.modules.pop("http", None)
+            _STDLIB_HTTP = importlib.import_module("http")
+            sys.modules["http"] = _STDLIB_HTTP
+        else:
+            _STDLIB_HTTP = saved_http
+
+        for mod_name, mod_obj in list(sys.modules.items()):
+            if mod_name.startswith("http.") and mod_obj is not None:
+                mod_file = os.path.abspath(getattr(mod_obj, "__file__", "") or "")
+                if tests_dir not in mod_file:
+                    sub_attr = mod_name.split(".", 1)[1].split(".", 1)[0]
+                    sub_mod = sys.modules.get(f"http.{sub_attr}")
+                    if sub_mod is not None and not hasattr(_STDLIB_HTTP, sub_attr):
+                        setattr(_STDLIB_HTTP, sub_attr, sub_mod)
+
+        yield _STDLIB_HTTP
+    finally:
+        sys.path[:] = saved_path
+        if saved_http is not None:
+            sys.modules["http"] = saved_http
+        elif any(os.path.abspath(p or ".") == tests_dir for p in saved_path):
+            sys.modules.pop("http", None)
+
+
+def import_service_isolated():
+    """在隔离 ``tests/http`` 的上下文中安全导入 ``service``（缺少 Flask 时跳过）。"""
+    if "service" in sys.modules:
+        return sys.modules["service"]
+    if importlib.util.find_spec("flask") is None:
+        return None
+    try:
+        with stdlib_http_context():
+            import http.client  # noqa: F401
+            import http.server  # noqa: F401
+            return importlib.import_module("service")
+    except ImportError:  # pragma: no cover
+        return None
 
 
 # ---------------------------------------------------------------------------

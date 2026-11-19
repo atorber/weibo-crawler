@@ -18,7 +18,6 @@ if PROJECT_DIR not in sys.path:
 from weibo import Weibo, handle_config_renaming, get_config as get_weibo_config
 import logging
 import logging.config
-import os
 from flask import Flask, jsonify, request
 import sqlite3
 import json
@@ -239,7 +238,7 @@ def schedule_refresh():
     while True:
         try:
             # 检查是否有运行中的任务
-            running_task_id, running_task = get_running_task()
+            _, running_task = get_running_task()
             if not running_task:
                 task_id = str(uuid.uuid4())
                 tasks[task_id] = {

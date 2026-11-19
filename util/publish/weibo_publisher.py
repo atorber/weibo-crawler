@@ -21,35 +21,27 @@ from datetime import datetime
 import hashlib
 import json
 import logging
-import mimetypes
 import os
 import re
 import time
-from urllib.parse import urlparse
 import zlib
-
-try:
-    import json5
-except ImportError:
-    json5 = None
 
 import requests
 from requests.exceptions import RequestException
 
 from util.browser_cookie import extract_and_save_cookie, get_cookie_auto_config
-from util.config import config_paths
 from util.passthrough.weibo_proxy import (
-    ALLOWED_IMAGE_DOMAIN_SUFFIXES,
+    ALLOWED_IMAGE_DOMAIN_SUFFIXES as ALLOWED_IMAGE_DOMAIN_SUFFIXES,
     DEFAULT_CLIENT_VERSION,
     DEFAULT_SERVER_VERSION,
     DEFAULT_USER_AGENT,
-    MIME_BY_EXT,
+    MIME_BY_EXT as MIME_BY_EXT,
     PLACEHOLDER_COOKIES,
     WeiboPassthroughProxy,
     _default_project_root,
     _guess_mime,
-    _parse_config_text,
-    is_allowed_weibo_image_url,
+    _parse_config_text as _parse_config_text,
+    is_allowed_weibo_image_url as is_allowed_weibo_image_url,
     normalize_weibo_image_url,
     resolve_active_cookie,
 )

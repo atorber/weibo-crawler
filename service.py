@@ -18,7 +18,6 @@ import logging
 import logging.config
 import os
 import re
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -32,13 +31,11 @@ from flask import (
     jsonify,
     render_template,
     request,
-    send_from_directory,
 )
 import json5
 import requests
 
 from util.browser_cookie import (
-    DEFAULT_COOKIE_AUTO_CONFIG,
     extract_and_save_cookie,
     extract_browser_cookies,
     get_cookie_auto_config,
@@ -54,7 +51,6 @@ from util.publish.weibo_publisher import (
     is_allowed_weibo_image_url,
     normalize_weibo_image_url,
 )
-from weibo import get_config as get_weibo_config, handle_config_renaming
 
 BASE_DIR = os.path.split(os.path.realpath(__file__))[0]
 CONFIG_PATH, EXAMPLE_CONFIG_PATH = config_paths.config_files(BASE_DIR)
@@ -1157,7 +1153,7 @@ def api_check_cookie():
 @app.route("/api/cookie/browsers", methods=["GET"])
 def api_cookie_browsers():
     try:
-        import rookiepy
+        import rookiepy  # noqa: F401
 
         available = True
     except ImportError:
@@ -2235,7 +2231,7 @@ def api_chat_read():
 def legacy_refresh():
     data = request.get_json(silent=True) or {}
     user_id_list = data.get("user_id_list")
-    ok, msg = controller.start(user_id_list)
+    ok, _ = controller.start(user_id_list)
     return (
         jsonify(
             {
@@ -2459,9 +2455,9 @@ if __name__ == "__main__":
                 port = candidate
                 break
 
-    print(f"\n=======================================================")
-    print(f"🚀 Weibo Crawler Web 控制台已启动!")
+    print("\n=======================================================")
+    print("🚀 Weibo Crawler Web 控制台已启动!")
     print(f"🔗 本地访问地址: http://127.0.0.1:{port}")
-    print(f"=======================================================\n")
+    print("=======================================================\n")
     logger.info(f"Weibo Crawler Web 控制台已启动: http://127.0.0.1:{port}")
     app.run(host=args.host, port=port, debug=False, threaded=True)

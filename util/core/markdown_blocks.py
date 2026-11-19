@@ -200,7 +200,7 @@ def _parse_comments(region: str) -> tuple[str, list[CommentItem]]:
     region = region.strip("\n")
     marker = ""
     text = region
-    first_line, sep, rest = region.partition("\n")
+    first_line, _, rest = region.partition("\n")
     if first_line.strip().startswith("<!--") and "comments:" in first_line:
         marker = first_line.strip()
         text = rest

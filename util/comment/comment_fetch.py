@@ -26,8 +26,8 @@ from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from util.core.weibo_visibility import (
-    WEIBO_STATUS_URL,
-    check_weibo_visibility,
+    WEIBO_STATUS_URL as WEIBO_STATUS_URL,
+    check_weibo_visibility as check_weibo_visibility,
 )
 
 logger = logging.getLogger(__name__)

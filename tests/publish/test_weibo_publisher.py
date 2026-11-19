@@ -14,6 +14,10 @@ import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from tests import _support  # noqa: E402
+
+_support.bootstrap()
+
 from util import browser_cookie  # noqa: E402
 from util.publish import weibo_publisher  # noqa: E402
 from util.publish.weibo_publisher import (  # noqa: E402
@@ -370,22 +374,12 @@ class WeiboPublisherTest(unittest.TestCase):
 
     def test_weibo_ctl_publish_cli_offline_dry_run(self):
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        tests_dir = os.path.join(repo_root, "tests")
         ctl_path = os.path.join(repo_root, "skills", "weibo-viewer", "scripts", "weibo_ctl.py")
 
-        saved_path = list(sys.path)
-        saved_http = sys.modules.get("http")
-        try:
-            sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != os.path.abspath(tests_dir)]
-            if saved_http is not None and tests_dir in os.path.abspath(getattr(saved_http, "__file__", "") or ""):
-                sys.modules.pop("http", None)
+        with _support.stdlib_http_context():
             spec = importlib.util.spec_from_file_location("weibo_ctl", ctl_path)
             weibo_ctl = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(weibo_ctl)
-        finally:
-            sys.path[:] = saved_path
-            if saved_http is not None:
-                sys.modules["http"] = saved_http
 
         fake_pub = mock.MagicMock()
         fake_pub.publish.return_value = {

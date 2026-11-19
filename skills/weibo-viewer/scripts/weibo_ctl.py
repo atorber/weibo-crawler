@@ -14,7 +14,6 @@ import sqlite3
 import urllib.request
 import urllib.error
 import urllib.parse
-from datetime import datetime
 
 # Resolve workspace root by traversing upwards until weibo.py is found
 def find_workspace_root():

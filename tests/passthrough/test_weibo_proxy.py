@@ -28,36 +28,7 @@ from util.passthrough import (  # noqa: E402
     is_safe_subpath,
 )
 
-def _import_service_isolated():
-    if "service" in sys.modules:
-        return sys.modules["service"]
-    tests_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-    saved_path = list(sys.path)
-    saved_http = sys.modules.get("http")
-    try:
-        sys.path[:] = [
-            p for p in sys.path if os.path.abspath(p or ".") != tests_dir
-        ]
-        if saved_http is not None and tests_dir in os.path.abspath(
-            getattr(saved_http, "__file__", "") or ""
-        ):
-            sys.modules.pop("http", None)
-        import importlib
-        import http.client  # noqa: F401
-        import http.server  # noqa: F401
-        return importlib.import_module("service")
-    finally:
-        sys.path[:] = saved_path
-        if saved_http is not None:
-            sys.modules["http"] = saved_http
-        else:
-            sys.modules.pop("http", None)
-
-
-try:
-    service = _import_service_isolated()
-except ImportError:  # pragma: no cover
-    service = None
+service = _support.import_service_isolated()
 
 
 class _FakeCookieJar:
