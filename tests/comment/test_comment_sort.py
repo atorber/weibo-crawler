@@ -39,6 +39,26 @@ class SortCommentBlockTest(unittest.TestCase):
         self.assertLess(sorted_block.index("cid: 11"), sorted_block.index("cid: 12"))
         self.assertIn("<!-- comments: 123 total=3 saved=3 -->", sorted_block)
 
+    def test_sort_keeps_replies_under_primary(self):
+        """回复行 `> > **…` 不得被当成一级评论切分。"""
+        block = (
+            "#### 评论\n\n"
+            "<!-- comments: 123 total=1 saved=1 -->\n\n"
+            "> **用户A** · 2024-01-01 09:00:00 <!-- cid: 1 -->\n"
+            "> 第一条\n"
+            ">\n"
+            "> > **回复A1** · 2024-01-01 10:00:00 <!-- cid: 11 -->\n"
+            "> > 回复正文\n\n"
+            "<!-- /comments -->"
+        )
+        sorted_block = comment_markdown.sort_comment_block(block)
+        # 回复仍在一级评论之后，且 cid: 11 出现一次（未被提升为独立一级）
+        self.assertLess(sorted_block.index("cid: 1"), sorted_block.index("cid: 11"))
+        self.assertEqual(sorted_block.count("cid: 11"), 1)
+        primary_pos = sorted_block.index("> **用户A**")
+        reply_pos = sorted_block.index("> > **回复A1**")
+        self.assertLess(primary_pos, reply_pos)
+
 
 if __name__ == "__main__":
     unittest.main()

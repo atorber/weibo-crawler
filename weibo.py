@@ -2774,6 +2774,20 @@ def _run_config_update(write: bool) -> int:
         return 1
 
 
+def _resolve_user_id_list_override(cli_users=None):
+    """解析本次运行的临时用户队列。
+
+    优先级：CLI ``--users`` > 环境变量 ``WEIBO_USER_ID_LIST`` > ``None``（用配置）。
+    环境变量支持逗号或空白分隔的 UID 列表。
+    """
+    if cli_users:
+        return [str(u).strip() for u in cli_users if str(u).strip()]
+    env_val = (os.environ.get("WEIBO_USER_ID_LIST") or "").strip()
+    if not env_val:
+        return None
+    return [part for part in re.split(r"[\s,]+", env_val) if part]
+
+
 def main():
     import argparse
 
@@ -2784,12 +2798,22 @@ def main():
     parser.add_argument(
         "--update-config", action="store_true", help="备份并写回配置更新"
     )
+    parser.add_argument(
+        "--users",
+        nargs="+",
+        default=None,
+        help="本次仅爬取这些用户 ID（覆盖配置中的 user_id_list；也可用环境变量 WEIBO_USER_ID_LIST）",
+    )
     args, _ = parser.parse_known_args()
     if args.check_config or args.update_config:
         sys.exit(_run_config_update(args.update_config))
 
     try:
         config = get_config()
+        override = _resolve_user_id_list_override(args.users)
+        if override is not None:
+            config["user_id_list"] = override
+            logger.info("本次临时用户队列（覆盖配置）: %s", ", ".join(override))
         wb = Weibo(config)
         wb.start()  # 爬取微博信息
         if const.NOTIFY["NOTIFY"]:

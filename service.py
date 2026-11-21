@@ -54,7 +54,6 @@ from util.publish.weibo_publisher import (
 
 BASE_DIR = os.path.split(os.path.realpath(__file__))[0]
 CONFIG_PATH, EXAMPLE_CONFIG_PATH = config_paths.config_files(BASE_DIR)
-USER_ID_FILE_PATH = config_paths.resolve_config_file(BASE_DIR, "user_id_list.txt")
 LOG_DIR = os.environ.get("WEIBO_LOG_DIR") or os.path.join(BASE_DIR, "log")
 PUBLISH_HISTORY_PATH = os.path.join(LOG_DIR, "publish_history.json")
 _publish_history_lock = threading.Lock()
@@ -130,8 +129,19 @@ class ProcessController:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
 
-            # If user_id_list specified for this run, we can temporarily write or pass
             cmd = [sys.executable, os.path.join(BASE_DIR, "weibo.py")]
+            # 临时用户队列：通过 --users / WEIBO_USER_ID_LIST 传给 weibo.py，
+            # 覆盖配置中的全量列表（单用户爬取、API 指定 UID 等）。
+            run_ids = []
+            if isinstance(user_id_list, str) and user_id_list.strip():
+                run_ids = [user_id_list.strip()]
+            elif isinstance(user_id_list, (list, tuple)):
+                run_ids = [str(u).strip() for u in user_id_list if str(u).strip()]
+            if run_ids:
+                env["WEIBO_USER_ID_LIST"] = ",".join(run_ids)
+                cmd.append("--users")
+                cmd.extend(run_ids)
+                self.log(f"--- 本次临时用户队列: {', '.join(run_ids)} ---")
 
             try:
                 self.process = subprocess.Popen(
@@ -577,11 +587,60 @@ def save_config_content(content_str):
 
 
 # User ID list helpers
+def _configured_user_id_list():
+    """Return config.json's user_id_list value (list, txt path string, or other)."""
+    raw = read_raw_config()
+    parsed = raw[1] if isinstance(raw, tuple) and len(raw) >= 2 else {}
+    return parsed.get("user_id_list", "")
+
+
+def get_user_id_file_path():
+    """Resolves the effective user_id_list.txt path from config.json at call time.
+
+    Fix: the old module-level constant resolved the bare filename once at
+    startup; when config/user_id_list.txt did not exist yet, resolve_config_file
+    fell back to the project root, so the /targets page wrote
+    <root>/user_id_list.txt while the crawler (util/config/config_loader.py)
+    resolved config.json's "config/user_id_list.txt" into the config directory.
+    The two paths never met and every crawl logged
+    "不存在 config/user_id_list.txt 文件". Resolving the configured value with
+    the same function the crawler uses keeps the UI write path and the crawl
+    read path identical.
+
+    When config uses an inline ID array, returns the canonical
+    ``config/user_id_list.txt`` path (used only if callers migrate to file mode).
+    """
+    configured = _configured_user_id_list()
+    if isinstance(configured, str) and configured.strip().endswith(".txt"):
+        return config_paths.resolve_config_file(BASE_DIR, configured.strip())
+    return config_paths.resolve_config_file(BASE_DIR, "config/user_id_list.txt")
+
+
 def get_user_targets():
-    """Reads user target list from user_id_list.txt or config.json."""
+    """Reads user target list from config.json array or user_id_list.txt.
+
+    Array mode takes precedence over any on-disk txt: the crawler reads the
+    JSON array, so the console must not prefer a stale txt left from an
+    earlier file-mode run.
+    """
     users = []
-    if os.path.isfile(USER_ID_FILE_PATH):
-        with open(USER_ID_FILE_PATH, "r", encoding="utf-8") as f:
+    configured = _configured_user_id_list()
+    if isinstance(configured, list):
+        for u in configured:
+            users.append(
+                {
+                    "id": str(u),
+                    "screen_name": "",
+                    "since_date": "",
+                    "query": "",
+                    "line_num": 0,
+                }
+            )
+        return users
+
+    user_file = get_user_id_file_path()
+    if os.path.isfile(user_file):
+        with open(user_file, "r", encoding="utf-8") as f:
             for idx, line in enumerate(f, 1):
                 line = line.strip()
                 if not line or line.startswith("#"):
@@ -601,26 +660,25 @@ def get_user_targets():
                             "line_num": idx,
                         }
                     )
-    else:
-        # Fall back to config.json's user_id_list
-        _, parsed, _ = read_raw_config()
-        uid_list = parsed.get("user_id_list", [])
-        if isinstance(uid_list, list):
-            for u in uid_list:
-                users.append(
-                    {
-                        "id": str(u),
-                        "screen_name": "",
-                        "since_date": "",
-                        "query": "",
-                        "line_num": 0,
-                    }
-                )
     return users
 
 
 def save_user_targets(users):
-    """Saves user list to user_id_list.txt."""
+    """Saves user list, keeping console and crawler on the same source.
+
+    - File mode (``user_id_list`` is a ``.txt`` path): write the txt file.
+    - Array mode (``user_id_list`` is a JSON list): write IDs back into
+      ``config.json`` so the crawler keeps reading the array (not a stale txt).
+    """
+    raw = read_raw_config()
+    parsed = raw[1] if isinstance(raw, tuple) and len(raw) >= 2 else {}
+    configured = parsed.get("user_id_list", "")
+
+    if isinstance(configured, list):
+        parsed["user_id_list"] = [str(u["id"]) for u in users]
+        save_config_content(json.dumps(parsed, indent=4, ensure_ascii=False))
+        return
+
     lines = []
     for u in users:
         parts = [str(u["id"])]
@@ -632,7 +690,11 @@ def save_user_targets(users):
             parts.append(str(u["query"]))
         lines.append(" ".join(parts))
 
-    with open(USER_ID_FILE_PATH, "w", encoding="utf-8") as f:
+    user_file = get_user_id_file_path()
+    parent_dir = os.path.dirname(user_file)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+    with open(user_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + ("\n" if lines else ""))
 
 

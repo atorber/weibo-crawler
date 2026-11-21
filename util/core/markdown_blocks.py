@@ -132,7 +132,7 @@ def _parse_heading(heading: str, fallback_date: str | None) -> tuple[str | None,
     return dt.strftime(DTFORMAT), dt
 
 
-def _is_primary_comment_start(line: str) -> bool:
+def is_primary_comment_start(line: str) -> bool:
     """判断一行是否「一级评论的开头」。
 
     ``comment_markdown`` 渲染的一级评论首行格式固定为
@@ -145,6 +145,10 @@ def _is_primary_comment_start(line: str) -> bool:
     if CID_RE.search(line):
         return True
     return bool(_PRIMARY_META_RE.match(line))
+
+
+# 兼容旧内部名称
+_is_primary_comment_start = is_primary_comment_start
 
 
 def _split_primary_groups(text: str) -> list[CommentItem] | None:
@@ -338,7 +342,8 @@ def merge_comment_groups(
     1. 新旧都有 cid → 按 cid 匹配（新内容覆盖旧内容）；
     2. 旧组无 cid、新组有 cid（旧块未升级）→ 按「去掉 cid 后的文本」匹配，
        用新组替换旧组（补上 cid，不产生重复）；
-    3. 其它情况按文本兜底，匹配不上才追加。
+    3. 其它情况（含双方都无 cid）不按文本合并，直接追加，避免不同用户
+       相同正文被误合并。
 
     同时顺带清理 existing 里已有的重复组（「无 cid 旧组 + 带 cid 新组」），
     保证重复执行幂等。
@@ -368,6 +373,7 @@ def merge_comment_groups(
             text_seen[text_key] = idx
     result = deduped
     cid_index = {item.cid: i for i, item in enumerate(result) if item.cid}
+    # 文本索引只收录无 cid 的旧组，供「升级补 cid」路径使用
     text_index = {
         _comment_text_key(item): i
         for i, item in enumerate(result)
@@ -378,7 +384,8 @@ def merge_comment_groups(
         matched = None
         if item.cid and item.cid in cid_index:
             matched = cid_index[item.cid]
-        else:
+        elif item.cid:
+            # 仅「新有 cid、旧无 cid」走文本兜底，避免无 cid↔无 cid 误合并
             text_key = _comment_text_key(item)
             if text_key and text_key in text_index:
                 matched = text_index[text_key]
@@ -387,19 +394,20 @@ def merge_comment_groups(
             result[matched] = item
             if old.cid and cid_index.get(old.cid) == matched:
                 cid_index.pop(old.cid, None)
+            old_text = _comment_text_key(old)
+            if old_text and text_index.get(old_text) == matched:
+                text_index.pop(old_text, None)
             if item.cid:
                 cid_index[item.cid] = matched
-            text_key = _comment_text_key(item)
-            if text_key:
-                text_index[text_key] = matched
+            elif _comment_text_key(item):
+                text_index[_comment_text_key(item)] = matched
         else:
             result.append(item)
             idx = len(result) - 1
             if item.cid:
                 cid_index[item.cid] = idx
-            text_key = _comment_text_key(item)
-            if text_key:
-                text_index[text_key] = idx
+            elif _comment_text_key(item):
+                text_index[_comment_text_key(item)] = idx
     return result
 
 

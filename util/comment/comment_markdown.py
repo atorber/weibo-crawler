@@ -31,7 +31,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 
-from util.core import atomic_io
+from util.core import atomic_io, markdown_blocks
 
 WEIBO_MARKER_RE = re.compile(r"<!--\s*weibo_id:\s*(\d+)\s*-->")
 COMMENT_START_RE = re.compile(r"<!--\s*comments:\s*(\d+)(\s[^>]*?)?\s*-->")
@@ -171,11 +171,11 @@ def sort_comment_block(block: str) -> str:
     body = text[marker_match.end(): end]
     lines = body.split("\n")
 
-    # 按一级评论行切分
+    # 按一级评论行切分（与 markdown_blocks 同一判定，排除 `> >` 回复行）
     top_chunks: list[list[str]] = []
     current: list[str] = []
     for line in lines:
-        if line.startswith("> **"):
+        if markdown_blocks.is_primary_comment_start(line):
             if current:
                 top_chunks.append(current)
             current = [line]

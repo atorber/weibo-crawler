@@ -205,7 +205,6 @@ class CommentMergeTest(unittest.TestCase):
         self.assertEqual(merged[0].cid, "1")
 
     def test_merge_dedupes_existing_duplicates(self):
-        ""
         existing = [
             markdown_blocks.CommentItem(cid=None, raw="> **A** · t1\n> 正文"),
             markdown_blocks.CommentItem(
@@ -215,6 +214,17 @@ class CommentMergeTest(unittest.TestCase):
         merged = markdown_blocks.merge_comment_groups(existing, [])
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].cid, "1")
+
+    def test_merge_does_not_text_match_cidless_incoming(self):
+        """双方都无 cid 时不按文本合并，避免相同正文误合并。"""
+        existing = [
+            markdown_blocks.CommentItem(cid=None, raw="> **A** · t1\n> 好"),
+        ]
+        incoming = [
+            markdown_blocks.CommentItem(cid=None, raw="> **B** · t2\n> 好"),
+        ]
+        merged = markdown_blocks.merge_comment_groups(existing, incoming)
+        self.assertEqual(len(merged), 2)
 
 class EditedAtTest(unittest.TestCase):
     def test_rebuild_block_text_roundtrip(self):
