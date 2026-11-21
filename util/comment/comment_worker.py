@@ -14,8 +14,22 @@ from util.comment import comment_markdown
 from util.comment import comment_refresh
 from util.core import archive_state
 from util.core.time_format import DTFORMAT
+from util.http import rate_limit
 
 logger = logging.getLogger("weibo")
+
+_MAX_CONSECUTIVE_FAILURES = 3
+
+
+def _defer_to_retry(wb, retry_map, targets, note, save=True) -> None:
+    """把目标微博记入评论重试清单（不发请求），下一轮自动补抓。"""
+    now = datetime.now().strftime(DTFORMAT)
+    for weibo_id, md_path in (targets or {}).items():
+        if md_path and os.path.isfile(md_path) and weibo_id not in retry_map:
+            retry_map[weibo_id] = {"md_path": md_path, "note": note, "updated_at": now}
+    if save:
+        wb._save_comment_retry(retry_map)
+        logger.warning("%s：%d 条已记入评论重试清单", note, len(retry_map))
 
 
 def run(wb) -> None:
@@ -72,6 +86,10 @@ def run(wb) -> None:
     if not targets:
         logger.info("本轮没有新写入 Markdown 的微博，也没有待刷新/待重试的评论，跳过评论抓取")
         return
+    if getattr(wb, "risk_tripped", False):
+        # 本轮已被风控：评论请求只会继续失败并加重风控，新微博记入重试清单留给下一轮
+        _defer_to_retry(wb, retry_map, written, "本轮命中风控，评论延后抓取")
+        return
 
     allowed_users = wb._comment_allowed_users()
     if allowed_users:
@@ -81,11 +99,12 @@ def run(wb) -> None:
         len(written),
         len(retried_ids),
     )
+    delay_min, delay_max = rate_limit.comment_delay_range(wb)
     options = comment_fetch.FetchOptions(
         max_root=int(getattr(wb, "comment_max_download_count", 0) or 0),
         max_reply=int(getattr(wb, "comment_reply_max_download_count", 0) or 0),
-        delay_min=float(getattr(wb, "comment_request_delay_min", 1.0) or 0),
-        delay_max=float(getattr(wb, "comment_request_delay_max", 2.0) or 0),
+        delay_min=delay_min,
+        delay_max=delay_max,
         include_latest=bool(getattr(wb, "comment_include_latest_stream", 0)),
         emoji_replace=bool(getattr(wb, "comment_emoji_replace", 1)),
         link_preview=bool(
@@ -99,9 +118,31 @@ def run(wb) -> None:
         image_dir=wb.markdown_file_dir.get("comment_image_dir", "评论图片"),
     )
 
+    request_headers = (
+        wb.get_random_headers() if getattr(wb, "anti_ban_enabled", False) else wb.headers
+    )
     results = []
     backed_up_files: set[str] = set()
+    consecutive_failures = 0
     for weibo_id, md_path in list(targets.items()):
+        if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+            # 连续失败多半是风控：停止本轮评论请求，剩余目标留给下一轮
+            done_ids = {item["weibo_id"] for item in results}
+            # 只延后新微博；已存档微博的评论刷新本来就会在后续轮次轮转到
+            remaining = {
+                wid: path
+                for wid, path in targets.items()
+                if wid not in done_ids and wid in written
+            }
+            logger.warning(
+                "评论连续 %d 条抓取失败（疑似风控），剩余 %d 条延后到下一轮",
+                consecutive_failures,
+                len(remaining),
+            )
+            _defer_to_retry(
+                wb, retry_map, remaining, "评论连续失败（疑似风控），延后抓取", save=False
+            )
+            break
         record = {
             "weibo_id": weibo_id,
             "md_path": md_path,
@@ -121,8 +162,9 @@ def run(wb) -> None:
                 results.append(record)
                 continue
             result = comment_fetch.fetch_comments(
-                wb.session, wb.headers, weibo_id, options
+                wb.session, request_headers, weibo_id, options
             )
+            consecutive_failures = consecutive_failures + 1 if result.failed else 0
             if allowed_users:
                 result = comment_fetch.filter_comments(result, allowed_users)
             record["filtered_users"] = len(allowed_users) if allowed_users else 0

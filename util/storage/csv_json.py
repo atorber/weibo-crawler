@@ -112,6 +112,18 @@ def write_json(wb, wrote_count) -> None:
     logger.info(path)
 
 
+def _keep_archived_text(new: dict, old: dict) -> dict:
+    """本轮未取长文全文：沿用已存档的完整正文（含被转发微博正文）。"""
+    merged = dict(new)
+    if old.get("text"):
+        merged["text"] = old["text"]
+    new_retweet = new.get("retweet")
+    old_retweet = old.get("retweet")
+    if isinstance(new_retweet, dict) and isinstance(old_retweet, dict) and old_retweet.get("text"):
+        merged["retweet"] = {**new_retweet, "text": old_retweet["text"]}
+    return merged
+
+
 def update_json_data(wb, data, weibo_info) -> object:
     """更新 json 数据：已存在的同 ID 微博用新值覆盖，不存在的追加。
 
@@ -132,6 +144,9 @@ def update_json_data(wb, data, weibo_info) -> object:
             continue
         key = str(new.get("id"))
         if key in index:
+            old = weibo_list[index[key]]
+            if new.get("long_text_skipped") and isinstance(old, dict):
+                new = _keep_archived_text(new, old)
             weibo_list[index[key]] = new
         else:
             index[key] = len(weibo_list)

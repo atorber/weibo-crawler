@@ -43,6 +43,7 @@ from util.browser_cookie import (
 )
 from util.chat import WeiboChatClient, is_group_id
 from util.config import config_paths
+from util.http import risk_guard
 from util.passthrough import WeiboPassthroughProxy
 from util.publish.weibo_publisher import (
     DEFAULT_USER_AGENT,
@@ -91,10 +92,17 @@ class ProcessController:
         self.lock = threading.Lock()
         self.monitor_thread = None
 
-    def start(self, user_id_list=None):
+    def start(self, user_id_list=None, scheduled=False):
         with self.lock:
             if self.is_running():
                 return False, "爬虫服务当前正在运行中，请勿重复启动"
+
+            risk_state = risk_guard.active_cooldown()
+            if risk_state and scheduled:
+                return False, (
+                    f"微博风控冷却中（{risk_state.get('reason', '')}），"
+                    f"至 {risk_state.get('risk_until_text', '')} 前跳过定时抓取"
+                )
 
             # 启动前检查 Cookie 有效性，若开启了自动更新且当前 Cookie 已失效，则自动从浏览器提取刷新
             try:
@@ -142,6 +150,13 @@ class ProcessController:
                 cmd.append("--users")
                 cmd.extend(run_ids)
                 self.log(f"--- 本次临时用户队列: {', '.join(run_ids)} ---")
+            if risk_state:
+                # 手动启动视为用户确认（如已更换登录 Cookie），忽略冷却期
+                cmd.append("--ignore-risk-cooldown")
+                self.log(
+                    f"⚠️ --- 风控冷却中（{risk_state.get('reason', '')}，至 "
+                    f"{risk_state.get('risk_until_text', '')}），手动启动将强制运行 ---"
+                )
 
             try:
                 self.process = subprocess.Popen(
@@ -513,6 +528,14 @@ class CrawlScheduler:
                 interval_sec = sched_cfg["interval_minutes"] * 60
                 elapsed = time.time() - self.last_reference_ts
                 if elapsed >= interval_sec:
+                    risk_state = risk_guard.active_cooldown()
+                    if risk_state:
+                        self.last_reference_ts = time.time()
+                        controller.log(
+                            f"⏰ [持续监听调度] 微博风控冷却中（{risk_state.get('reason', '')}），"
+                            f"至 {risk_state.get('risk_until_text', '')} 前跳过本次巡检"
+                        )
+                        continue
                     with self.lock:
                         self.last_reference_ts = time.time()
                         self.run_count += 1
@@ -522,7 +545,7 @@ class CrawlScheduler:
                     controller.log(
                         f"⏰ [持续监听调度] 已到达定时巡检周期 (每 {sched_cfg['interval_minutes']} 分钟)，自动启动第 {self.run_count} 轮增量抓取..."
                     )
-                    controller.start()
+                    controller.start(scheduled=True)
             except Exception as e:
                 logger.debug(f"CrawlScheduler loop error: {e}")
 
@@ -544,6 +567,7 @@ class CrawlScheduler:
             "last_trigger_time": self.last_trigger_time,
             "run_count": self.run_count,
             "next_run_in_seconds": next_run_in,
+            "risk": risk_guard.active_cooldown(),
         }
 
 
@@ -858,6 +882,7 @@ def api_status():
         "log_entries_count": len(controller.log_buffer),
     }
     status_info["schedule"] = crawl_scheduler.get_status()
+    status_info["risk"] = risk_guard.active_cooldown()
     return jsonify({"code": 200, "data": status_info})
 
 

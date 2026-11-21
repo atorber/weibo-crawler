@@ -152,20 +152,29 @@
         "max_session_time": 600,                                   // 单次运行最长时间（秒）
         "max_api_errors": 5,                                       // 连续 API 错误上限（次）
         "rest_time_min": 180,                                      // 触发休息时的最短休息时间（秒）
+        "detail_delay_min": 3,                                     // 长微博详情页请求间隔下限（秒）
+        "detail_delay_max": 6,                                     // 长微博详情页请求间隔上限（秒）
+        "comment_delay_min": 3,                                    // 评论请求间隔下限（秒；启用时覆盖更小的 comment_request_delay_min）
+        "comment_delay_max": 6,                                    // 评论请求间隔上限（秒）
+        "html_risk_cooldown": 120,                                 // 命中 HTML 风控页时的同页冷却基数（秒，逐次递增）
+        "html_risk_cooldown_max": 600,                             // HTML 风控同页冷却上限（秒）
+        "html_risk_page_retries": 2,                               // 同页风控冷却后最多再试几次；仍失败则结束本轮
+        "risk_cooldown_minutes": 60,                               // 本轮以风控告终后，后续定时运行暂停多久（分钟，连续触发翻倍）
+        "risk_cooldown_max_minutes": 360,                          // 跨运行风控冷却上限（分钟）
         "random_rest_probability": 0.01,                           // 额外随机休息概率（0-1）
-        "user_agents": [                                           // 随机 User-Agent 列表
+        "user_agents": [                                           // User-Agent 候选列表（每轮运行固定选一个）
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
             "Mozilla/5.0 (Linux; Android 14; SM-S9180) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.113 Mobile Safari/537.36"
         ],
-        "accept_languages": [                                      // 随机 Accept-Language 列表
+        "accept_languages": [                                      // Accept-Language 候选列表（每轮运行固定选一个）
             "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
             "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
             "zh-TW,zh;q=0.9,en;q=0.8"
         ],
-        "referer_list": [                                          // 随机 Referer 列表
+        "referer_list": [                                          // 已弃用：API 请求的 Referer 固定为目标用户主页 m.weibo.cn/u/<uid>
             "https://m.weibo.cn/",
             "https://weibo.com/",
             "https://www.weibo.com/"

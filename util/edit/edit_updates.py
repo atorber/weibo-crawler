@@ -164,6 +164,10 @@ def apply(wb, wrote_count) -> object:
                     "new_label": archive_state.visibility_label(visible),
                 }
             )
+        if w.get("long_text_skipped") and not first_seen:
+            # 已存档且未编辑的长文：本轮没取全文，不比较、不改写，只刷新可见性与最近出现时间
+            archive_state.upsert_weibo(state, wid, visibility=visible, touch=True)
+            continue
         baseline = first_seen or not old_fp
         md_file, md_rel = wb._locate_block_file(wid, item or {}, created_at)
         long_text_failed = bool(w.get("long_text_failed"))
@@ -292,6 +296,17 @@ def apply(wb, wrote_count) -> object:
             logger.info("编辑更新已写回: %s（%d 个块）", md_file, len(doc.blocks))
         except Exception as exc:  # noqa: BLE001
             wb._record_write_failure("编辑更新写回", md_file, str(exc))
+    # 记录编辑次数与长文完整性：下一轮据此判断能否跳过长文详情页请求
+    for w in batch:
+        if w.get("long_text_skipped"):
+            continue
+        item = archive_state.get_weibo(state, str(w.get("id") or ""))
+        if item is None:
+            continue
+        item["edit_count"] = int(w.get("edit_count") or 0)
+        item["long_text_incomplete"] = bool(
+            w.get("long_text_failed") or (w.get("retweet") or {}).get("long_text_failed")
+        )
     try:
         archive_state.save_state(state, wb._state_path, wb._atomic_write_text)
     except Exception as exc:  # noqa: BLE001

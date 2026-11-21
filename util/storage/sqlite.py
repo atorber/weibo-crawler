@@ -187,6 +187,18 @@ def sqlite_exist_file(wb, url) -> bool:
 def sqlite_insert_weibo(wb, con, weibo) -> None:
     """等价原 Weibo.sqlite_insert_weibo。"""
     sqlite_weibo = wb.parse_sqlite_weibo(weibo)
+    if weibo.get("long_text_skipped") and sqlite_weibo:
+        # 本轮未取长文全文（列表页正文是截断的）：已有行保留原 text，只更新其余字段
+        columns = list(sqlite_weibo.keys())
+        updates = ",".join(f"{c}=excluded.{c}" for c in columns if c not in ("id", "text"))
+        sql = "INSERT INTO weibo (%s) VALUES (%s) ON CONFLICT(id) DO UPDATE SET %s" % (
+            ",".join(columns),
+            ",".join("?" for _ in columns),
+            updates,
+        )
+        con.execute(sql, list(sqlite_weibo.values()))
+        con.commit()
+        return
     wb.sqlite_insert(con, sqlite_weibo, "weibo")
 
 

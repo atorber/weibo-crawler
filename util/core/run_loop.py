@@ -12,9 +12,15 @@ def run_users(
     before_each,
     process,
     after_all=None,
+    should_stop=None,
 ) -> None:
-    """依次对每个用户执行 before_each + process；全部完成后执行 after_all。"""
+    """依次对每个用户执行 before_each + process；全部完成后执行 after_all。
+
+    ``should_stop`` 返回 True 时不再处理后续用户（如本轮已命中风控）。
+    """
     for user_config in user_config_list:
+        if should_stop is not None and should_stop():
+            break
         before_each(user_config)
         process(user_config)
     if after_all is not None:

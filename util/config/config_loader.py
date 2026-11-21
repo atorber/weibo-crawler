@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import random
-import re
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -289,29 +288,12 @@ def apply(wb, config) -> None:
     wb.cookie_auto_config = config.get("cookie_auto_config") or {}
     wb._last_cookie_refresh_ts = 0.0
 
-    core_cookies = {}   # 核心包
-    backup_cookies = {} # 备份
-    # Cookie清洗：提取核心字段。若后续预热失败，则回退使用原版 _T_WM/XSRF-TOKEN
-    if cookie_string and "SUB=" in cookie_string:
-        # 1. 提取核心 SUB
-        match_sub = re.search(r'SUB=(.*?)(;|$)', cookie_string)
-        if match_sub:
-            core_cookies['SUB'] = match_sub.group(1)
-
-        # 2. 提取备份指纹
-        match_twm = re.search(r'_T_WM=(.*?)(;|$)', cookie_string)
-        if match_twm:
-            backup_cookies['_T_WM'] = match_twm.group(1)
-
-        match_xsrf = re.search(r'XSRF-TOKEN=(.*?)(;|$)', cookie_string)
-        if match_xsrf:
-            backup_cookies['XSRF-TOKEN'] = match_xsrf.group(1)
-
-    # 保底：如果没有提取到 SUB，说明格式特殊，全量加载
-    if not core_cookies and cookie_string:
-        for pair in cookie_string.split(';'):
-            if '=' in pair:
-                key, value = pair.split('=', 1)
+    # 全量保留 Cookie：登录态依赖 SUB 之外的 SUBP/SCF/ALF/XSRF-TOKEN 等字段
+    core_cookies = {}
+    for pair in (cookie_string or "").split(';'):
+        if '=' in pair:
+            key, value = pair.split('=', 1)
+            if key.strip():
                 core_cookies[key.strip()] = value.strip()
 
     wb.headers = {
@@ -344,15 +326,11 @@ def apply(wb, config) -> None:
 
     wb.session = requests_session
     try:
-        # 请求只带 SUB
-        # 服务器下发适配 m.weibo.cn 的新指纹
+        # 访问 m.weibo.cn 首页，让服务器下发 _T_WM / XSRF-TOKEN 等指纹
         wb.session.get("https://m.weibo.cn", headers=wb.headers, timeout=10)
         logger.info("Session 预热成功，服务器已下发最新指纹。")
-
     except Exception as e:  # noqa: BLE001 兜底：失败不阻断
-        #请求失败时，启用备份
-        logger.warning(f"Session 预热失败 ({e})，正在启用备份 Cookie...")
-        wb.session.cookies.update(backup_cookies) # 把旧指纹装进去救急
+        logger.warning(f"Session 预热失败 ({e})，继续使用配置中的 Cookie")
 
     adapter = _make_http_adapter()
     wb.session.mount('http://', adapter)
@@ -409,18 +387,43 @@ def apply(wb, config) -> None:
         "max_api_errors": 5,
         "rest_time_min": 180,
         "random_rest_probability": 0.01,
+        # 长微博详情页 / 评论请求的最小间隔（秒）
+        "detail_delay_min": 3,
+        "detail_delay_max": 6,
+        "comment_delay_min": 3,
+        "comment_delay_max": 6,
+        # HTML 风控页（200 + text/html）：同页冷却基数/上限、同页冷却重试次数
+        "html_risk_cooldown": 120,
+        "html_risk_cooldown_max": 600,
+        "html_risk_page_retries": 2,
+        # 跨运行风控熔断：本轮风控未恢复时，后续运行暂停的分钟数（连续触发翻倍）
+        "risk_cooldown_minutes": 60,
+        "risk_cooldown_max_minutes": 360,
         "user_agents": [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0"
         ],
         "accept_languages": ["zh-CN,zh;q=0.9,en;q=0.8"],
-        "referer_list": ["https://m.weibo.cn/", "https://weibo.com/"],
     }
     raw_anti_ban = config.get("anti_ban_config")
     if not isinstance(raw_anti_ban, dict):
         raw_anti_ban = {}
     wb.anti_ban_config = {**default_anti_ban, **raw_anti_ban}
     wb.anti_ban_enabled = bool(wb.anti_ban_config.get("enabled", False))
+    # 每轮运行固定一套 UA / 语言，所有请求（API、详情、评论）保持同一指纹
+    wb.session_user_agent = http_client.pick_session_value(
+        wb.anti_ban_config.get("user_agents"), http_client.DEFAULT_USER_AGENTS
+    )
+    wb.session_accept_language = http_client.pick_session_value(
+        wb.anti_ban_config.get("accept_languages"),
+        http_client.DEFAULT_ACCEPT_LANGUAGES,
+    )
+    if wb.anti_ban_enabled:
+        http_client.apply_user_agent(wb.headers, wb.session_user_agent)
+        wb.headers["accept-language"] = wb.session_accept_language
+    wb._last_request_ts = 0.0
+    wb.risk_tripped = False
+    wb.is_guest = False
 
     # 爬取状态跟踪
     wb.crawl_stats = {
@@ -476,9 +479,9 @@ def calculate_dynamic_delay(wb) -> object:
         if time_elapsed > 300:  # 5分钟
             base_delay += 5
 
-    # 随机波动
-    max_delay = config.get("request_delay_max", 15)
-    return random.uniform(base_delay, max_delay)
+    # 加成只抬高下限，不超过配置上限
+    max_delay = max(config.get("request_delay_max", 15), config.get("request_delay_min", 8))
+    return random.uniform(min(base_delay, max_delay), max_delay)
 
 def should_pause_session(wb) -> object:
     """检查是否应该暂停当前会话"""
@@ -521,19 +524,8 @@ def check_batch_delay(wb) -> None:
     batch_size = config.get("batch_size", 50)
     batch_delay = config.get("batch_delay", 30)
 
-    # 检查是否达到批次大小
+    # 检查是否达到批次大小：每批结束休息一次 batch_delay（不再重复补睡）
     if wb.crawl_stats["batch_count"] >= batch_size:
-        current_time = time.time()
-
-        # 检查距离上次批次的时间
-        if wb.crawl_stats["last_batch_time"]:
-            time_since_last_batch = current_time - wb.crawl_stats["last_batch_time"]
-            if time_since_last_batch < batch_delay:
-                # 如果距离上次批次时间太短，等待补足
-                wait_time = batch_delay - time_since_last_batch
-                logger.info(f"批次延迟: 等待 {wait_time:.1f} 秒")
-                sleep(wait_time)
-
         logger.info(f"批次延迟: 等待 {batch_delay} 秒")
         sleep(batch_delay)
 
@@ -542,11 +534,23 @@ def check_batch_delay(wb) -> None:
         wb.crawl_stats["last_batch_time"] = time.time()
 
 def get_random_headers(wb) -> object:
-    """获取随机请求头（实现见 util/http_client.py）。"""
+    """API 请求头（实现见 util/http_client.py）：本轮固定 UA，Referer 为目标用户主页。"""
+    user_config = getattr(wb, "user_config", None) or {}
+    xsrf = None
+    session = getattr(wb, "session", None)
+    if session is not None:
+        try:
+            xsrf = session.cookies.get("XSRF-TOKEN")
+        except Exception:  # noqa: BLE001 cookie jar 冲突等不影响请求
+            xsrf = None
     return http_client.random_headers(
         getattr(wb, "anti_ban_enabled", 0),
         getattr(wb, "anti_ban_config", {}),
         wb.headers,
+        user_agent=getattr(wb, "session_user_agent", None),
+        accept_language=getattr(wb, "session_accept_language", None),
+        referer=http_client.profile_referer(user_config.get("user_id")),
+        xsrf_token=xsrf,
     )
 
 def update_crawl_stats(wb, weibo_count=0, request_count=0, api_error=False) -> None:
@@ -560,6 +564,8 @@ def update_crawl_stats(wb, weibo_count=0, request_count=0, api_error=False) -> N
 
     if request_count > 0:
         wb.crawl_stats["request_count"] += request_count
+        # api_errors 表示「连续」错误：请求成功即清零
+        wb.crawl_stats["api_errors"] = 0
 
     if api_error:
         wb.crawl_stats["api_errors"] += 1

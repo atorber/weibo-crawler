@@ -72,6 +72,15 @@ def _read_parsed_config():
         return {}
 
 
+def has_login_markers(cookie_dict) -> bool:
+    """Cookie 是否带登录态标记（游客 Cookie 只有 tid/SUB/SUBP 等）。"""
+    if not isinstance(cookie_dict, dict):
+        return False
+    if str(cookie_dict.get("MLOGIN") or "") == "1":
+        return True
+    return any(cookie_dict.get(key) for key in ("SSOLoginState", "ALF", "SCF"))
+
+
 def verify_cookie_string(cookie_str):
     """Probes Weibo PC, Mobile, and Public endpoints to check if a Cookie string is valid."""
     if not cookie_str or cookie_str.strip() in (
@@ -85,7 +94,6 @@ def verify_cookie_string(cookie_str):
             "user": {},
         }
 
-    # 1. 探针 1：测试微博网页端 (weibo.com PC)
     headers_pc = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -95,6 +103,87 @@ def verify_cookie_string(cookie_str):
         "Referer": "https://weibo.com/",
         "accept": "application/json, text/plain, */*",
     }
+
+    # 1. 探针 1：微博移动端 (m.weibo.cn) 登录标志——爬虫走的就是这个域，结论最可靠
+    mobile_login = _probe_mobile_login(cookie_str)
+    if mobile_login is not None and mobile_login.get("login"):
+        s_name = mobile_login.get("screen_name") or "已登录用户"
+        return {
+            "valid": True,
+            "personal_login": True,
+            "message": f"Cookie 验证通过！登录账号：{s_name}",
+            "user": {"id": mobile_login.get("uid", ""), "screen_name": s_name},
+        }
+
+    # 2. 探针 2：微博网页端 (weibo.com PC)。游客 Cookie 也会返回 ok=1，
+    #    所以只在移动端探针请求失败（无法判断）时才用它判定登录
+    pc_result = None if mobile_login is not None else _probe_pc_login(headers_pc)
+    if pc_result is not None:
+        return pc_result
+
+    # 3. 探针 3：测试公共只读抓取权限（针对访客 Cookie 或 SUB 凭据）
+    try:
+        r_pub = requests.get(
+            "https://weibo.com/ajax/profile/info?custom=1669879400",
+            headers=headers_pc,
+            timeout=6,
+        )
+        if r_pub.status_code == 200 and r_pub.json().get("ok") == 1:
+            return {
+                "valid": True,
+                "personal_login": False,
+                "message": (
+                    "Cookie 未登录（游客身份）：只能读取公开数据，爬虫翻页会被微博风控；"
+                    "请在浏览器登录 m.weibo.cn 后重新提取 Cookie"
+                ),
+                "user": {"id": "", "screen_name": "游客 (未登录)"},
+            }
+    except Exception as e:
+        logger.debug(f"Public probe failed: {e}")
+
+    return {
+        "valid": False,
+        "personal_login": False,
+        "message": "Cookie 认证未通过或已过期，未能获取到有效数据权限，建议重新登录并更新 Cookie",
+        "user": {},
+    }
+
+
+def _probe_mobile_login(cookie_str):
+    """请求 m.weibo.cn/api/config；返回 {"login", "uid", "screen_name"}，请求失败返回 None。"""
+    headers_mobile = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        ),
+        "Cookie": cookie_str,
+        "Referer": "https://m.weibo.cn/",
+        "accept": "application/json, text/plain, */*",
+        "x-requested-with": "XMLHttpRequest",
+        "mweibo-pwa": "1",
+    }
+    try:
+        r_mob = requests.get(
+            "https://m.weibo.cn/api/config",
+            headers=headers_mobile,
+            timeout=6,
+        )
+        if r_mob.status_code != 200:
+            return None
+        data = (r_mob.json() or {}).get("data") or {}
+    except Exception as e:
+        logger.debug(f"Mobile probe failed: {e}")
+        return None
+    user = data.get("user") or {}
+    return {
+        "login": data.get("login") is True,
+        "uid": str(data.get("uid") or user.get("id") or ""),
+        "screen_name": user.get("screen_name", ""),
+    }
+
+
+def _probe_pc_login(headers_pc):
+    """weibo.com 网页端探针（仅移动端探针不可用时兜底）；通过返回结果 dict，否则 None。"""
     try:
         r_pc = requests.get(
             "https://weibo.com/ajax/profile/detail",
@@ -136,60 +225,7 @@ def verify_cookie_string(cookie_str):
                 }
     except Exception as e:
         logger.debug(f"PC probe failed: {e}")
-
-    # 2. 探针 2：测试微博移动端 (m.weibo.cn H5)
-    headers_mobile = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
-        ),
-        "Cookie": cookie_str,
-        "Referer": "https://m.weibo.cn/",
-        "accept": "application/json, text/plain, */*",
-    }
-    try:
-        r_mob = requests.get(
-            "https://m.weibo.cn/api/config",
-            headers=headers_mobile,
-            timeout=6,
-        )
-        if r_mob.status_code == 200:
-            js = r_mob.json()
-            if js.get("data", {}).get("login") is True:
-                user = js.get("data", {}).get("user", {})
-                s_name = user.get("screen_name", "已登录用户")
-                return {
-                    "valid": True,
-                    "personal_login": True,
-                    "message": f"移动端 Cookie 验证通过！登录账号：{s_name}",
-                    "user": {"id": user.get("id", ""), "screen_name": s_name},
-                }
-    except Exception as e:
-        logger.debug(f"Mobile probe failed: {e}")
-
-    # 3. 探针 3：测试公共只读抓取权限（针对访客 Cookie 或 SUB 凭据）
-    try:
-        r_pub = requests.get(
-            "https://weibo.com/ajax/profile/info?custom=1669879400",
-            headers=headers_pc,
-            timeout=6,
-        )
-        if r_pub.status_code == 200 and r_pub.json().get("ok") == 1:
-            return {
-                "valid": True,
-                "personal_login": False,
-                "message": "Cookie 连通性测试通过（具备微博公共数据抓取权限，未绑定个人账号画像）",
-                "user": {"id": "", "screen_name": "有效凭证 (公共抓取)"},
-            }
-    except Exception as e:
-        logger.debug(f"Public probe failed: {e}")
-
-    return {
-        "valid": False,
-        "personal_login": False,
-        "message": "Cookie 认证未通过或已过期，未能获取到有效数据权限，建议重新登录并更新 Cookie",
-        "user": {},
-    }
+    return None
 
 
 def extract_browser_cookies(browser_name="auto", prefer_domain=None):
@@ -269,6 +305,7 @@ def extract_browser_cookies(browser_name="auto", prefer_domain=None):
                 "browser_name": b_name,
                 "count": len(cookie_dict),
                 "has_sub": has_sub,
+                "has_login": has_login_markers(cookie_dict),
             }, None
         except Exception as e:
             err_msg = str(e)
@@ -312,14 +349,15 @@ def extract_browser_cookies(browser_name="auto", prefer_domain=None):
     for b in candidates:
         res, err = try_extract_from(b)
         if res:
-            if res["has_sub"]:
+            if res["has_sub"] and res.get("has_login"):
                 return res["cookie_str"], None, res["browser_name"]
             results.append(res)
         elif err and "未安装" not in err and "未找到" not in err:
             errors.append(err)
 
     if results:
-        best = max(results, key=lambda x: x["count"])
+        # 没有带登录标记的浏览器时，退而求其次：有 SUB 的优先，其次字段最多的
+        best = max(results, key=lambda x: (x["has_sub"], x["count"]))
         return best["cookie_str"], None, best["browser_name"]
 
     msg = "未能自动从本地浏览器中提取到微博 Cookie。"
@@ -369,11 +407,24 @@ def extract_and_save_cookie(
 
     check_result = verify_cookie_string(cookie_str)
     valid = check_result.get("valid", False)
+    personal_login = bool(check_result.get("personal_login"))
+    parsed = None
+    try:
+        parsed = _read_parsed_config()
+    except Exception as e:
+        logger.debug(f"读取配置失败: {e}")
+    # 游客 Cookie 只在配置里本来没有 Cookie 时写入，绝不覆盖已有 Cookie
+    # （浏览器未登录时提取到的是游客 SUB，覆盖后爬虫翻页会持续被风控）
+    current_cookie = str((parsed or {}).get("cookie") or "").strip()
+    has_current = bool(current_cookie) and current_cookie not in (
+        "your cookie",
+        "YOUR_WEIBO_COOKIE_HERE",
+    )
+    should_save = valid and (personal_login or not has_current)
+    skipped_guest = valid and not personal_login and has_current
 
-    # Save to config.json if valid
-    if valid:
+    if should_save:
         try:
-            parsed = _read_parsed_config()
             if parsed:
                 # If config["cookie"] points to a .txt file, update that file; otherwise update config["cookie"]
                 cfg_cookie = parsed.get("cookie", "")
@@ -395,20 +446,23 @@ def extract_and_save_cookie(
         except Exception as e:
             logger.error(f"自动保存提取的 Cookie 到配置文件失败: {e}")
 
+    message = f"成功从 {detected_browser or target_browser} 提取微博 Cookie！" + (
+        f" {check_result.get('message', '')}" if check_result.get("message") else ""
+    )
+    if skipped_guest:
+        message = (
+            f"{detected_browser or target_browser} 中的微博 Cookie 未登录（游客身份），"
+            "未覆盖配置中的 Cookie；请先在浏览器登录 m.weibo.cn / weibo.com"
+        )
     return {
         "ok": bool(valid),
-        "success": True,
+        "success": not skipped_guest,
         "cookie": cookie_str,
         "browser": detected_browser or target_browser,
-        "valid": valid,
+        "valid": valid and not skipped_guest,
+        "personal_login": personal_login,
+        "saved": should_save,
         "user": check_result.get("user", {}),
-        "message": (
-            f"成功从 {detected_browser or target_browser} 提取微博 Cookie！"
-            + (
-                f" {check_result.get('message', '')}"
-                if check_result.get("message")
-                else ""
-            )
-        ),
+        "message": message,
         "timestamp": now_str,
     }

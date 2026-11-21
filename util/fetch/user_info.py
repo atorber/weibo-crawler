@@ -13,6 +13,9 @@ from collections import OrderedDict
 
 from requests.exceptions import RequestException
 
+from util.http import rate_limit
+from util.http import weibo_json as weibo_json_util
+
 logger = logging.getLogger("weibo")
 
 
@@ -46,20 +49,34 @@ def get_user_info(wb) -> int:
         try:
             logger.info(f"准备获取ID：{wb.user_config['user_id']}的用户信息第{retries+1}次。")
 
-            # 防封禁：使用随机请求头
+            # 防封禁：本轮固定指纹的 API 请求头
             current_headers = wb.get_random_headers()
 
-            # 防封禁：动态延迟
-            delay = wb.calculate_dynamic_delay()
-            if delay > 0:
-                logger.debug(f"动态延迟: {delay:.1f} 秒")
-                _sleep(delay)
+            # 防封禁：统一节奏（与列表页/详情页共用上次请求时刻）
+            waited = rate_limit.pace(wb, wb.calculate_dynamic_delay(), _sleep)
+            if waited > 0:
+                logger.debug(f"请求间隔: {waited:.1f} 秒")
 
             response = wb.session.get(url, params=params, headers=current_headers, timeout=10)
             if getattr(response, "status_code", 200) in (403, 418, 432):
                 refresher = getattr(wb, "try_auto_refresh_cookie", None)
                 if callable(refresher) and refresher(f"HTTP {response.status_code}"):
                     continue
+            if weibo_json_util.looks_like_html_risk(response):
+                logger.warning(
+                    "用户信息接口返回 HTML 风控页（%s）",
+                    weibo_json_util._response_diag(response),
+                )
+                weibo_json_util.record_html_risk(wb)
+                refresher = getattr(wb, "try_auto_refresh_cookie", None)
+                if retries == 0 and callable(refresher) and refresher("用户信息HTML风控页"):
+                    retries += 1
+                    continue
+                # 连用户信息都被风控：本轮继续请求只会加重，熔断交给调用方
+                logger.error("用户信息接口被风控，本轮停止后续请求")
+                wb.risk_tripped = True
+                wb.risk_reason = "用户信息接口 HTML 风控"
+                return 1
             response.raise_for_status()
             js = response.json()
 

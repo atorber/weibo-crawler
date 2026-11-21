@@ -22,6 +22,8 @@ from util.core import csvutil
 from util.core import errors
 from util.core.dateutil import convert_to_days_ago
 from util.core.time_format import DTFORMAT
+from util.http import weibo_json
+from util.http.weibo_json import HTML_RISK
 from util.misc.notify import push_deer
 
 logger = logging.getLogger("weibo")
@@ -50,6 +52,12 @@ def get_one_page(wb, page) -> object:
             wb.crawl_success["api_ended"] = True
             logger.info("第%d页接口返回无更多数据，分页结束", page)
             return True
+        if js == HTML_RISK:
+            # HTML 风控：让 get_pages 冷却后重试同页，而不是直接跳到下一页
+            wb.crawl_success["success"] = False
+            wb.crawl_success["reason"] = f"第{page}页命中HTML风控"
+            logger.warning("第%d页命中 HTML 风控，冷却后重试同页", page)
+            return HTML_RISK
         if not js:
             # 请求重试耗尽（get_weibo_json 返回 {}）：本页失败，交给完成判定处理
             wb.crawl_success.setdefault("page_errors", []).append(page)
@@ -326,67 +334,154 @@ def get_pages(wb) -> None:
             wb.crawl_success["window_start"] = wb.user_config["since_date"]
             wb.crawl_success["window_end"] = wb.start_date
             wb._snapshot_archived_ids()
-            pages = range(wb.start_page, page_count + 1)
+            pages = list(range(wb.start_page, page_count + 1))
+            if getattr(wb, "is_guest", False) and len(pages) > 1:
+                logger.warning(
+                    "游客 Cookie：本轮只抓第 %d 页（共 %d 页），不推进抓取进度",
+                    pages[0],
+                    page_count,
+                )
+                pages = pages[:1]
             last_page = 0
-            for page in tqdm(pages, desc="Progress"):
-                last_page = page
-                wb.crawl_success["pages_processed"] = last_page
-                is_end = wb.get_one_page(page)
+            page_rest_retries = {}
+            html_risk_retries = {}
+            max_same_page_rest = int(
+                (getattr(wb, "anti_ban_config", None) or {}).get(
+                    "html_risk_page_retries", 2
+                )
+                or 2
+            )
+            page_bar = tqdm(total=len(pages), desc="Progress")
+            idx = 0
+            try:
+                while idx < len(pages):
+                    page = pages[idx]
+                    last_page = page
+                    wb.crawl_success["pages_processed"] = last_page
+                    is_end = wb.get_one_page(page)
 
-                # 本页新抓到的立刻落库（sqlite/markdown/csv 等），避免中断丢数；
-                # 含 need_rest / hit_since_date 前已 append 进内存的部分。
-                if wb.got_count > wrote_count:
-                    wb.write_data(wrote_count)
-                    wrote_count = wb.got_count
+                    # 本页新抓到的立刻落库（sqlite/markdown/csv 等），避免中断丢数；
+                    # 含 need_rest / hit_since_date 前已 append 进内存的部分。
+                    if wb.got_count > wrote_count:
+                        wb.write_data(wrote_count)
+                        wrote_count = wb.got_count
 
-                # 防封禁：检查是否需要休息
-                if is_end == "need_rest":
-                    wb.perform_anti_ban_rest()
-                    wb.reset_crawl_stats()
-                    continue
-
-                if is_end:
-                    break
-
-                # 防封禁：页失败/API 错误累积时检查暂停条件（仅在出现错误时调用，
-                # 避免正常页触发随机休息）。
-                if wb.anti_ban_enabled and (
-                    wb.crawl_success.get("page_errors")
-                    or wb.crawl_stats.get("api_errors", 0)
-                    >= wb.anti_ban_config.get("max_api_errors", 5)
-                ):
-                    pause, pause_reason = wb.should_pause_session()
-                    if pause:
+                    # HTML 风控：逐次加长冷却后重试同页；仍失败则结束本轮（继续翻页只会加重风控）
+                    if is_end == HTML_RISK:
+                        tries = html_risk_retries.get(page, 0)
+                        if tries >= max_same_page_rest:
+                            logger.error(
+                                "第%d页冷却重试 %d 次后仍被风控，本轮停止抓取并保留已抓数据",
+                                page,
+                                tries,
+                            )
+                            wb.crawl_success.setdefault("page_errors", []).append(page)
+                            wb.crawl_success["success"] = False
+                            wb.crawl_success["reason"] = f"第{page}页风控未恢复，本轮提前结束"
+                            wb.risk_tripped = True
+                            wb.risk_reason = f"第{page}页 HTML 风控"
+                            break
+                        html_risk_retries[page] = tries + 1
+                        cooldown = weibo_json._html_risk_cooldown(wb, tries)
                         logger.warning(
-                            "防封禁触发暂停条件（%s），本轮提前结束并保留已抓数据",
-                            pause_reason,
+                            "第%d页风控冷却 %d 秒后重试（同页第 %d/%d 次）",
+                            page,
+                            cooldown,
+                            tries + 1,
+                            max_same_page_rest,
                         )
-                        wb.crawl_success["reason"] = f"防封禁暂停: {pause_reason}"
+                        sleep(cooldown)
+                        if wb.anti_ban_enabled:
+                            wb.reset_crawl_stats()
+                        continue
+
+                    # 防封禁暂停（数量/时长/随机/连续错误）：休息后重试同页
+                    if is_end == "need_rest":
+                        page_rest_retries[page] = page_rest_retries.get(page, 0) + 1
+                        if page_rest_retries[page] > max_same_page_rest:
+                            logger.error(
+                                "第%d页休息重试仍失败（已 %d 次），跳过该页",
+                                page,
+                                page_rest_retries[page],
+                            )
+                            wb.crawl_success.setdefault("page_errors", []).append(page)
+                            wb.crawl_success["success"] = False
+                            wb.crawl_success["reason"] = f"第{page}页休息重试耗尽"
+                            page_bar.update(1)
+                            idx += 1
+                            continue
+                        logger.warning(
+                            "会话休息后重试第%d页（同页第 %d/%d 次）",
+                            page,
+                            page_rest_retries[page],
+                            max_same_page_rest,
+                        )
+                        wb.perform_anti_ban_rest()
+                        wb.reset_crawl_stats()
+                        continue
+
+                    if is_end:
+                        page_bar.update(1)
                         break
 
-                # 防封禁：检查批次延迟
-                if wb.anti_ban_enabled:
-                    wb.check_batch_delay()
+                    # 防封禁：页失败/API 错误累积时检查暂停条件（仅在出现错误时调用，
+                    # 避免正常页触发随机休息）。
+                    if wb.anti_ban_enabled and (
+                        wb.crawl_success.get("page_errors")
+                        or wb.crawl_stats.get("api_errors", 0)
+                        >= wb.anti_ban_config.get("max_api_errors", 5)
+                    ):
+                        pause, pause_reason = wb.should_pause_session()
+                        if pause:
+                            # 风控类错误优先休息重试同页；数量/时长耗尽才提前结束
+                            if "API错误" in (pause_reason or "") and page_rest_retries.get(
+                                page, 0
+                            ) < max_same_page_rest:
+                                page_rest_retries[page] = (
+                                    page_rest_retries.get(page, 0) + 1
+                                )
+                                logger.warning(
+                                    "API 错误过多，休息后重试第%d页（%s）",
+                                    page,
+                                    pause_reason,
+                                )
+                                wb.perform_anti_ban_rest()
+                                wb.reset_crawl_stats()
+                                continue
+                            logger.warning(
+                                "防封禁触发暂停条件（%s），本轮提前结束并保留已抓数据",
+                                pause_reason,
+                            )
+                            wb.crawl_success["reason"] = f"防封禁暂停: {pause_reason}"
+                            break
 
-                # 防封禁：使用更保守的延迟，可按配置调整
-                if wb.anti_ban_enabled:
-                    # 如果启用了防封禁，使用更保守的延迟
-                    if (page - page1) % random_pages == 0 and page < page_count:
-                        delay = random.randint(8, 12)  # 更保守的延迟
-                        sleep(delay)
-                        page1 = page
-                        random_pages = random.randint(1, 5)
-                else:
-                    # 默认延迟逻辑
-                    if (page - page1) % random_pages == 0 and page < page_count:
+                    # 防封禁：请求间隔由统一节奏（rate_limit）控制，这里只做批次休息
+                    if wb.anti_ban_enabled:
+                        wb.check_batch_delay()
+                    elif (page - page1) % random_pages == 0 and page < page_count:
+                        # 未启用防封禁时保留旧的翻页随机休息
                         sleep(random.randint(6, 10))
                         page1 = page
                         random_pages = random.randint(1, 5)
+
+                    page_bar.update(1)
+                    idx += 1
+            finally:
+                page_bar.close()
 
             # 兜底：若循环外仍有未写增量（正常路径每页已写，此处多为 no-op）
             if wb.got_count > wrote_count:
                 wb.write_data(wrote_count)
             wb._finalize_crawl_success(last_page, page_count)
+            if not wb.crawl_success.get("success"):
+                if getattr(wb, "risk_tripped", False):
+                    wb.crawl_success["reason"] = (
+                        f"{getattr(wb, 'risk_reason', '') or '风控'}未恢复，本轮提前结束"
+                    )
+                elif getattr(wb, "is_guest", False):
+                    wb.crawl_success["reason"] = (
+                        "游客 Cookie 只抓第 1 页：" + str(wb.crawl_success.get("reason") or "")
+                    )
         else:
             wb.crawl_success["reason"] = "起始时间在未来，本轮未爬取"
 

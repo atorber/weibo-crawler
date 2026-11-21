@@ -273,7 +273,13 @@ function updateStatusUI(data) {
       dashSchedInterval.value = String(sched.interval_minutes);
     }
     if (dashSchedStatus) {
-      if (sched.enabled) {
+      const risk = data.risk;
+      if (risk && !isRunning) {
+        const remMin = Math.ceil((risk.remaining_seconds || 0) / 60);
+        dashSchedStatus.style.background = 'rgba(244, 63, 94, 0.16)';
+        dashSchedStatus.style.color = 'var(--accent-rose)';
+        dashSchedStatus.textContent = `⛔ 微博风控冷却中（${risk.reason || '风控'}）· 至 ${risk.risk_until_text || '-'}（约 ${remMin} 分钟）定时巡检暂停；手动启动将强制运行`;
+      } else if (sched.enabled) {
         if (isRunning) {
           dashSchedStatus.style.background = 'rgba(16, 185, 129, 0.16)';
           dashSchedStatus.style.color = '#10b981';

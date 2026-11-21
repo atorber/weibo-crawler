@@ -9,6 +9,37 @@ from util.core import archive_state
 logger = logging.getLogger("weibo")
 
 
+_UNSAFE_SKIP_MODES = ("mysql", "mongo", "mongodb", "post")
+
+
+def can_skip_long_text(wb, weibo_id, weibo_info) -> bool:
+    """已完整存档且未再编辑的长微博可跳过详情页请求（列表页截断正文不会覆盖存档）。
+
+    条件：markdown 存档 + 状态索引记录过完整全文与编辑次数，且编辑次数未变。
+    mysql/mongo/post 后端会用截断正文覆盖，此时不跳过。
+    """
+    write_mode = getattr(wb, "write_mode", None) or []
+    if "markdown" not in write_mode or any(m in write_mode for m in _UNSAFE_SKIP_MODES):
+        return False
+    ensure_state = getattr(wb, "_ensure_archive_state", None)
+    if not callable(ensure_state):
+        return False
+    try:
+        item = archive_state.get_weibo(ensure_state(), weibo_id)
+    except Exception:  # noqa: BLE001 状态索引不可用时按需请求详情
+        return False
+    if not item or not item.get("content_hash") or not item.get("md_path"):
+        return False
+    if item.get("status", archive_state.STATUS_ACTIVE) != archive_state.STATUS_ACTIVE:
+        return False
+    if "edit_count" not in item or item.get("long_text_incomplete"):
+        return False
+    try:
+        return int(item["edit_count"]) == int(weibo_info.get("edit_count") or 0)
+    except (TypeError, ValueError):
+        return False
+
+
 def get_one_weibo(wb, info) -> object:
     """获取一条微博的全部信息"""
     try:
@@ -18,9 +49,18 @@ def get_one_weibo(wb, info) -> object:
         is_long = (
             True if weibo_info.get("pic_num") > 9 else weibo_info.get("isLongText")
         )
+        is_long_retweet = bool(
+            retweeted_status and retweeted_status.get("isLongText")
+        )
+        long_skipped = (is_long or is_long_retweet) and can_skip_long_text(
+            wb, weibo_id, weibo_info
+        )
+        if long_skipped:
+            logger.debug("长微博已完整存档且未编辑，跳过详情页: %s", weibo_id)
+            is_long = False
+            is_long_retweet = False
         if retweeted_status and retweeted_status.get("id"):  # 转发
             retweet_id = retweeted_status.get("id")
-            is_long_retweet = retweeted_status.get("isLongText")
             if is_long:
                 weibo = wb.get_long_weibo(weibo_id)
                 if not weibo:
@@ -48,6 +88,8 @@ def get_one_weibo(wb, info) -> object:
                     weibo["long_text_failed"] = True
             else:
                 weibo = wb.parse_weibo(weibo_info)
+        if long_skipped:
+            weibo["long_text_skipped"] = True
         weibo["created_at"], weibo["full_created_at"] = wb.standardize_date(
             weibo_info["created_at"]
         )

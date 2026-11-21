@@ -47,6 +47,8 @@ from util.config import config_paths
 from util.media import media_download
 from util.media import media_time
 from util.http import http_client
+from util.http import rate_limit
+from util.http import risk_guard
 from util.http import weibo_json
 from util.comment import comment_retry
 from util.comment import comment_backfill
@@ -238,11 +240,12 @@ class Weibo(object):
 
     def get_json(self, params):
         """请求 m.weibo.cn API 并返回 (json, status)（实现见 util/http/http_client.py）。"""
+        rate_limit.pace(self, self.calculate_dynamic_delay(), sleep)
         return http_client.fetch_json(
             self.session,
             "https://m.weibo.cn/api/container/getIndex?",
             params=params,
-            headers=self.headers,
+            headers=self.get_random_headers(),
             logger=logger,
         )
 
@@ -309,6 +312,12 @@ class Weibo(object):
 
         if not result.get("ok") or not result.get("cookie"):
             logger.warning("自动刷新 Cookie 未成功: %s", result.get("message") or "未提取到有效 Cookie")
+            return False
+        if not result.get("personal_login"):
+            # 游客 Cookie 换上去只会继续被风控，不热更新
+            logger.warning(
+                "浏览器中的微博 Cookie 未登录（游客身份），不热更新；请在浏览器登录 m.weibo.cn 后重试"
+            )
             return False
 
         new_cookie = result["cookie"]
@@ -480,20 +489,25 @@ class Weibo(object):
         """
         url = "https://m.weibo.cn/detail/%s" % id
         logger.info(f"""URL: {url} """)
-        for i in range(5):
-            sleep(random.uniform(1.0, 2.5))
+        for i in range(3):
+            rate_limit.pace(self, rate_limit.detail_interval(self), sleep)
             try:
                 response = self.session.get(
                     url, headers=self.headers, verify=False, timeout=10
                 )
                 html = response.text
+                if '"status":' not in html and weibo_json.looks_like_html_risk(response):
+                    # 详情页本身是 HTML；没有内嵌 status 数据才是风控/登录壳，重试无益
+                    logger.warning("长微博详情页疑似风控，回退截断正文: %s", id)
+                    weibo_json.record_html_risk(self)
+                    return None
                 html = html[html.find('"status":') :]
                 html = html[: html.rfind('"call"')]
                 html = html[: html.rfind(",")]
                 html = "{" + html + "}"
                 js = json.loads(html, strict=False)
             except (RequestException, ValueError, TypeError, AttributeError) as e:
-                logger.warning("长微博详情页获取失败（第 %d/5 次）: %s", i + 1, e)
+                logger.warning("长微博详情页获取失败（第 %d/3 次）: %s", i + 1, e)
                 continue
             weibo_info = js.get("status")
             if weibo_info:
@@ -2457,6 +2471,76 @@ class Weibo(object):
         except Exception as e:  # noqa: BLE001 兜底：单点失败不阻断主流程
             logger.error(f"保存 Cookie 到文件失败: {e}")
 
+    def _risk_cooldown_blocks_run(self):
+        """上一轮以风控告终且冷却未结束：本轮跳过（--ignore-risk-cooldown 可强制运行）。"""
+        state = risk_guard.active_cooldown()
+        if not state:
+            return False
+        minutes = max(1, int(state.get("remaining_seconds", 0) // 60))
+        if getattr(self, "ignore_risk_cooldown", False):
+            logger.warning(
+                "风控冷却中（%s，至 %s），已按要求强制运行；若仍被风控将延长冷却",
+                state.get("reason", ""),
+                state.get("risk_until_text", ""),
+            )
+            return False
+        logger.warning(
+            "上一轮命中风控（%s），冷却至 %s（约 %d 分钟后），本轮跳过；"
+            "如已更换登录 Cookie，可使用 --ignore-risk-cooldown 强制运行",
+            state.get("reason", ""),
+            state.get("risk_until_text", ""),
+            minutes,
+        )
+        return True
+
+    def _check_login_state(self):
+        """探测当前 Cookie 是否为登录态；游客只能稳定拿到第 1 页，翻页会被风控。"""
+        self.is_guest = False
+        try:
+            rate_limit.pace(self, self.calculate_dynamic_delay(), sleep)
+            response = self.session.get(
+                "https://m.weibo.cn/api/config",
+                headers=self.get_random_headers(),
+                timeout=10,
+            )
+            data = (response.json() or {}).get("data") or {}
+        except Exception as e:  # noqa: BLE001 探测失败不阻断，按已登录处理
+            logger.info("登录状态探测失败（按已登录处理）: %s", e)
+            return
+        if data.get("login") is True:
+            logger.info("Cookie 登录状态：已登录（uid=%s）", data.get("uid") or "")
+            return
+        self.is_guest = True
+        message = (
+            "当前 Cookie 未登录（游客身份）：翻页会被微博风控，本轮每个用户只抓第 1 页。"
+            "请在浏览器登录 m.weibo.cn 后更新 Cookie"
+        )
+        logger.warning(message)
+        if const.NOTIFY["NOTIFY"]:
+            push_deer("weibo-crawler：" + message)
+
+    def _update_risk_state(self):
+        """本轮以风控告终则写入跨运行冷却；顺利运行则清除。"""
+        if getattr(self, "risk_tripped", False):
+            cfg = getattr(self, "anti_ban_config", None) or {}
+            state = risk_guard.trip(
+                getattr(self, "risk_reason", "") or "HTML 风控",
+                base_minutes=cfg.get("risk_cooldown_minutes", 60),
+                max_minutes=cfg.get("risk_cooldown_max_minutes", 360),
+            )
+            message = (
+                f"本轮命中微博风控（{state['reason']}），后续运行暂停至 "
+                f"{state['risk_until_text']}（第 {state['streak']} 次，冷却 "
+                f"{state['cooldown_minutes']} 分钟）"
+            )
+            if getattr(self, "is_guest", False):
+                message += "；当前为游客 Cookie，请登录后更新 Cookie"
+            logger.error(message)
+            if const.NOTIFY["NOTIFY"]:
+                push_deer("weibo-crawler：" + message)
+            return
+        risk_guard.clear()
+
     def _output_root_dir(self):
         """数据输出目录的绝对路径（主爬与回填共用，用于并发锁）。"""
         return file_lock.resolve_output_dir(_BASE_DIR, self.output_directory)
@@ -2594,15 +2678,20 @@ class Weibo(object):
 
         逐用户循环骨架见 util/core/run_loop.py；这里只做锁与异常处理。
         """
+        if self._risk_cooldown_blocks_run():
+            return
         lock = self._acquire_run_lock()
         if lock is None:
             return
         try:
+            self._check_login_state()
             run_loop.run_users(
                 self.user_config_list,
                 before_each=self._reset_run_state,
                 process=self._process_user,
+                should_stop=lambda: bool(getattr(self, "risk_tripped", False)),
             )
+            self._update_risk_state()
         except Exception as e:  # noqa: BLE001 兜底：单点失败不阻断主流程
             if errors.is_programming_error(e):
                 # 代码缺陷（漏 import、属性不存在等）：明确标记并进失败报告。
@@ -2804,6 +2893,11 @@ def main():
         default=None,
         help="本次仅爬取这些用户 ID（覆盖配置中的 user_id_list；也可用环境变量 WEIBO_USER_ID_LIST）",
     )
+    parser.add_argument(
+        "--ignore-risk-cooldown",
+        action="store_true",
+        help="忽略上一轮风控留下的冷却期，强制运行（如已更换登录 Cookie）",
+    )
     args, _ = parser.parse_known_args()
     if args.check_config or args.update_config:
         sys.exit(_run_config_update(args.update_config))
@@ -2815,6 +2909,7 @@ def main():
             config["user_id_list"] = override
             logger.info("本次临时用户队列（覆盖配置）: %s", ", ".join(override))
         wb = Weibo(config)
+        wb.ignore_risk_cooldown = bool(args.ignore_risk_cooldown)
         wb.start()  # 爬取微博信息
         if const.NOTIFY["NOTIFY"]:
             push_deer("更新了一次微博")
