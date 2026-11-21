@@ -1,8 +1,8 @@
 """微博分页抓取。
 
 ``get_one_page`` 抓取并解析一页，``get_pages`` 负责分页循环、结束判定与
-防封禁统计；依赖的 wb 方法（get_weibo_json/initialize_info/write_data 等）
-由 Weibo 实例提供。搬运自 weibo.py，逻辑与行为保持不变。
+防封禁统计；每页有新微博时立刻 ``write_data`` 落库（不再攒满 20 页）。
+依赖的 wb 方法（get_weibo_json/initialize_info/write_data 等）由 Weibo 实例提供。
 """
 
 from __future__ import annotations
@@ -333,16 +333,15 @@ def get_pages(wb) -> None:
                 wb.crawl_success["pages_processed"] = last_page
                 is_end = wb.get_one_page(page)
 
-                # 防封禁：检查是否需要休息
-                if is_end == "need_rest":
-                    # 先写入已爬取的数据
+                # 本页新抓到的立刻落库（sqlite/markdown/csv 等），避免中断丢数；
+                # 含 need_rest / hit_since_date 前已 append 进内存的部分。
+                if wb.got_count > wrote_count:
                     wb.write_data(wrote_count)
                     wrote_count = wb.got_count
 
-                    # 执行休息
+                # 防封禁：检查是否需要休息
+                if is_end == "need_rest":
                     wb.perform_anti_ban_rest()
-
-                    # 重置统计，继续爬取
                     wb.reset_crawl_stats()
                     continue
 
@@ -369,10 +368,6 @@ def get_pages(wb) -> None:
                 if wb.anti_ban_enabled:
                     wb.check_batch_delay()
 
-                if page % 20 == 0:  # 每爬20页写入一次文件
-                    wb.write_data(wrote_count)
-                    wrote_count = wb.got_count
-
                 # 防封禁：使用更保守的延迟，可按配置调整
                 if wb.anti_ban_enabled:
                     # 如果启用了防封禁，使用更保守的延迟
@@ -388,7 +383,9 @@ def get_pages(wb) -> None:
                         page1 = page
                         random_pages = random.randint(1, 5)
 
-            wb.write_data(wrote_count)  # 将剩余不足20页的微博写入文件
+            # 兜底：若循环外仍有未写增量（正常路径每页已写，此处多为 no-op）
+            if wb.got_count > wrote_count:
+                wb.write_data(wrote_count)
             wb._finalize_crawl_success(last_page, page_count)
         else:
             wb.crawl_success["reason"] = "起始时间在未来，本轮未爬取"
