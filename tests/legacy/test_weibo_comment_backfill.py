@@ -9,6 +9,7 @@
 
 import json
 import logging
+import os
 import sys
 import tempfile
 import types
@@ -426,7 +427,26 @@ class FileLockTest(unittest.TestCase):
 
     def test_lock_path_in_output_dir(self) -> None:
         path = file_lock.lock_path_for_output("/tmp/weibo_data")
-        self.assertEqual(path, "/tmp/weibo_data/.weibo_crawler.lock")
+        self.assertTrue(path.endswith(os.path.join("weibo_data", ".weibo_crawler.lock")))
+        self.assertEqual(
+            os.path.basename(path),
+            ".weibo_crawler.lock",
+        )
+
+    def test_stale_lock_file_is_reclaimed(self) -> None:
+        """Windows 旧版 O_EXCL / 异常退出残留的锁文件，持有者已死后应可回收。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / ".weibo_crawler.lock")
+            # 模拟已死进程留下的锁文件（PID 在本机几乎不可能存活）
+            Path(path).write_text("1 weibo-crawler\n", encoding="utf-8")
+            with mock.patch.object(file_lock, "is_pid_alive", return_value=False):
+                lock = file_lock.FileLock(path)
+                lock.acquire()
+                lock.release()
+            # 回收后应能再次正常获取
+            again = file_lock.FileLock(path)
+            again.acquire()
+            again.release()
 
 
 class BackfillSafetyTest(unittest.TestCase):
